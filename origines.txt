@@ -1,0 +1,40 @@
+# Aéroports de départ du catalogue (un code IATA par ligne, # = commentaire)
+# Chaque aéroport ajoute ~65 à 105 destinations (les plus proposées par Google, escales comprises).
+
+# Europe
+CDG
+ORY
+LHR
+FRA
+AMS
+MAD
+FCO
+IST
+# Afrique
+DSS
+LBV
+CMN
+ABJ
+LOS
+ADD
+JNB
+CAI
+ALG
+TUN
+NBO
+DLA
+# Moyen-Orient / Asie
+DXB
+DOH
+SIN
+NRT
+HKG
+BKK
+DEL
+# Amériques
+JFK
+LAX
+ATL
+YUL
+GRU
+MEX

@@ -1,0 +1,58 @@
+# Aéroports français (métropole + Corse) avec vols commerciaux — du plus important au moins important
+# Format : CODE;Ville
+CDG;Paris
+ORY;Paris
+NCE;Nice
+LYS;Lyon
+MRS;Marseille
+TLS;Toulouse
+BSL;Bâle-Mulhouse
+BOD;Bordeaux
+NTE;Nantes
+BVA;Beauvais
+LIL;Lille
+MPL;Montpellier
+SXB;Strasbourg
+BIQ;Biarritz
+AJA;Ajaccio
+BIA;Bastia
+RNS;Rennes
+BES;Brest
+TLN;Toulon-Hyères
+PUF;Pau
+PGF;Perpignan
+CFE;Clermont-Ferrand
+FSC;Figari
+CLY;Calvi
+LRH;La Rochelle
+BZR;Béziers
+LDE;Tarbes-Lourdes
+EGC;Bergerac
+GNB;Grenoble
+CMF;Chambéry
+ETZ;Metz-Nancy
+FNI;Nîmes
+RDZ;Rodez
+CCF;Carcassonne
+BVE;Brive
+LIG;Limoges
+LRT;Lorient
+UIP;Quimper
+DNR;Dinard
+PIS;Poitiers
+TUF;Tours
+CFR;Caen
+DOL;Deauville
+AVN;Avignon
+LAI;Lannion
+DCM;Castres
+AUR;Aurillac
+AGF;Agen
+LPY;Le Puy
+DLE;Dole
+NCY;Annecy
+EBU;Saint-Étienne
+XCR;Châlons-Vatry
+URO;Rouen
+LEH;Le Havre
+ANE;Angers

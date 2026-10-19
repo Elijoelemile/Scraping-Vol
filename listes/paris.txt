@@ -1,0 +1,4 @@
+# Aéroports parisiens — Format : CODE;Ville
+CDG;Paris
+ORY;Paris
+BVA;Beauvais

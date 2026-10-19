@@ -1,0 +1,20 @@
+# Aéroports marocains avec vols commerciaux — du plus important au moins important
+# Format : CODE;Ville  (Dakhla et Laâyoune : desservis depuis le Maroc)
+CMN;Casablanca
+RAK;Marrakech
+AGA;Agadir
+FEZ;Fès
+TNG;Tanger
+RBA;Rabat
+NDR;Nador
+OUD;Oujda
+ESU;Essaouira
+OZZ;Ouarzazate
+AHU;Al Hoceïma
+TTU;Tétouan
+VIL;Dakhla
+EUN;Laâyoune
+ERH;Errachidia
+BEM;Béni Mellal
+OZG;Zagora
+TTA;Tan-Tan

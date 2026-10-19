@@ -1,0 +1,9 @@
+# Aéroports du Cap-Vert avec vols commerciaux — du plus important au moins important
+# Format : CODE;Ville
+SID;Sal
+BVC;Boa Vista
+RAI;Praia
+VXE;Mindelo (São Vicente)
+SFL;São Filipe (Fogo)
+MMO;Maio
+SNE;São Nicolau

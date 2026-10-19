@@ -1,0 +1,34 @@
+# Aéroports thaïlandais avec vols commerciaux — du plus important au moins important
+# Format : CODE;Ville
+BKK;Bangkok
+DMK;Bangkok
+HKT;Phuket
+CNX;Chiang Mai
+USM;Koh Samui
+KBV;Krabi
+HDY;Hat Yai
+CEI;Chiang Rai
+UTP;U-Tapao (Pattaya)
+URT;Surat Thani
+UTH;Udon Thani
+KKC;Khon Kaen
+UBP;Ubon Ratchathani
+NST;Nakhon Si Thammarat
+HHQ;Hua Hin
+TST;Trang
+BFV;Buriram
+PHS;Phitsanulok
+NAW;Narathiwat
+LPT;Lampang
+NNT;Nan
+PRH;Phrae
+MAQ;Mae Sot
+TDX;Trat
+ROI;Roi Et
+SNO;Sakon Nakhon
+KOP;Nakhon Phanom
+LOE;Loei
+CJM;Chumphon
+UNN;Ranong
+HGN;Mae Hong Son
+THS;Sukhothai

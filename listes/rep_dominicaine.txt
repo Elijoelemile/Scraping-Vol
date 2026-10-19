@@ -1,0 +1,9 @@
+# Aéroports de République dominicaine avec vols commerciaux — du plus important au moins important
+# Format : CODE;Ville
+PUJ;Punta Cana
+SDQ;Saint-Domingue
+POP;Puerto Plata
+STI;Santiago
+LRM;La Romana
+AZS;Samaná
+JBQ;Saint-Domingue (La Isabela)

@@ -1,0 +1,11 @@
+# Session Google de l'utilisateur (cookies, adresse e-mail) : ne jamais publier
+.profil_google/
+
+# Environnement Python et fichiers temporaires
+.venv/
+__pycache__/
+*.pyc
+
+# Données collectées et journaux (régénérés par l'application)
+vols.db
+*.log
