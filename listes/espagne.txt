@@ -1,3 +1,45 @@
-# Aéroports espagnols (pour l'instant : Lanzarote, îles Canaries)
+# Aéroports espagnols avec vols commerciaux (péninsule, Baléares, Canaries, Melilla) — du plus important au moins important
 # Format : CODE;Ville
+MAD;Madrid
+BCN;Barcelone
+PMI;Palma de Majorque
+AGP;Malaga
+ALC;Alicante
+LPA;Grande Canarie
+TFS;Tenerife (Sud)
+TFN;Tenerife (Nord)
+IBZ;Ibiza
+VLC;Valence
+SVQ;Séville
+BIO;Bilbao
 ACE;Lanzarote
+FUE;Fuerteventura
+MAH;Minorque
+SCQ;Saint-Jacques-de-Compostelle
+GRX;Grenade
+VGO;Vigo
+OVD;Oviedo (Asturies)
+XRY;Jerez de la Frontera
+SDR;Santander
+LEI;Almería
+REU;Reus
+GRO;Gérone
+ZAZ;Saragosse
+RMU;Murcie
+LCG;La Corogne
+SPC;La Palma
+VDE;El Hierro
+GMZ;La Gomera
+BJZ;Badajoz
+VLL;Valladolid
+EAS;Saint-Sébastien
+VIT;Vitoria
+PNA;Pampelune
+LEN;León
+SLM;Salamanque
+RJL;Logroño
+HSK;Huesca
+CDT;Castellón
+MLN;Melilla
+ODB;Cordoue
+ABC;Albacete
