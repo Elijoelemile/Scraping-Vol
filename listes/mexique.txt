@@ -1,0 +1,50 @@
+# Aéroports mexicains avec vols commerciaux — du plus important au moins important
+# Format : CODE;Ville
+MEX;Mexico
+CUN;Cancún
+GDL;Guadalajara
+MTY;Monterrey
+TIJ;Tijuana
+SJD;San José del Cabo (Los Cabos)
+PVR;Puerto Vallarta
+TQO;Tulum
+NLU;Mexico (Felipe Ángeles)
+BJX;León (Bajío)
+MID;Mérida
+OAX;Oaxaca
+HMO;Hermosillo
+CUL;Culiacán
+VER;Veracruz
+CZM;Cozumel
+ZIH;Ixtapa-Zihuatanejo
+ACA;Acapulco
+PBC;Puebla
+QRO;Querétaro
+SLP;San Luis Potosí
+AGU;Aguascalientes
+MZT;Mazatlán
+TAM;Tampico
+VSA;Villahermosa
+TGZ;Tuxtla Gutiérrez
+CJS;Ciudad Juárez
+CUU;Chihuahua
+DGO;Durango
+HUX;Huatulco
+LAP;La Paz
+ZCL;Zacatecas
+ZLO;Manzanillo
+MLM;Morelia
+TRC;Torreón
+REX;Reynosa
+LMM;Los Mochis
+CME;Ciudad del Carmen
+CPE;Campeche
+CTM;Chetumal
+PXM;Puerto Escondido
+TAP;Tapachula
+NLD;Nuevo Laredo
+MXL;Mexicali
+CEN;Ciudad Obregón
+LTO;Loreto
+TLC;Toluca
+PQM;Palenque
