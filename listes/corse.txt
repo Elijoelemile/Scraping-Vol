@@ -1,0 +1,6 @@
+# Aéroports de Corse — du plus important au moins important
+# Format : CODE;Ville
+AJA;Ajaccio
+BIA;Bastia
+FSC;Figari (Sud-Corse)
+CLY;Calvi
