@@ -588,10 +588,15 @@ async def resoudre_pays(texte: str) -> dict | None:
 
 async def vols_pays(pays_depart: dict, pays_arrivee: dict, date_aller: str, date_retour: str | None = None,
                     adultes: int = 1, classe: str = "eco") -> list[dict]:
-    """Tous les vols d'un pays vers un autre à une date (une seule recherche Google, tous aéroports confondus)."""
+    """Tous les vols d'un pays vers un autre à une date (une seule recherche Google, tous aéroports confondus).
+
+    pays_depart / pays_arrivee : {"mid", "nom"} d'un pays (type 5 par défaut), ou d'un aéroport avec
+    {"mid": code IATA, "type": 0, "nom": ville} pour chercher d'un pays vers un aéroport précis.
+    """
     from google_flights_scraper import Trajet
     t = Trajet(pays_depart["mid"], pays_arrivee["mid"], date_aller, date_retour, adultes, classe)
-    lieux = {t.origine: (pays_depart["mid"], 5), t.destination: (pays_arrivee["mid"], 5)}
+    lieux = {t.origine: (pays_depart["mid"], pays_depart.get("type", 5)),
+             t.destination: (pays_arrivee["mid"], pays_arrivee.get("type", 5))}
     gf = GoogleFlights(delai=1.0)
     try:
         await gf.ouvrir()
@@ -734,6 +739,23 @@ def trajets(origine: str | None = None) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT * FROM trajets_catalogue" + (" WHERE origine = ?" if origine else "")
             + " ORDER BY prix_min IS NULL, prix_min", con, params=[origine] if origine else [])
+
+
+def calendrier_combine(origines: list[str], destinations: str | list[str]) -> pd.DataFrame:
+    """Calendrier « tous aéroports confondus » : chaque jour, le prix le plus bas parmi les trajets
+    origines × destinations, avec le trajet (origine, destination) correspondant."""
+    destinations = [destinations] if isinstance(destinations, str) else list(destinations)
+    if not origines or not destinations:
+        return pd.DataFrame(columns=["date", "prix", "origine", "destination", "collecte_le"])
+    with closing(connexion()) as con:
+        cal = pd.read_sql_query(
+            f"SELECT date, prix, origine, destination, collecte_le FROM calendrier WHERE date >= ?"
+            f" AND destination IN ({','.join('?' * len(destinations))})"
+            f" AND origine IN ({','.join('?' * len(origines))})",
+            con, params=[date.today().isoformat(), *destinations, *origines])
+    if cal.empty:
+        return cal
+    return (cal.sort_values(["date", "prix"]).drop_duplicates("date").reset_index(drop=True))
 
 
 def calendrier_trajet(o: str, d: str) -> pd.DataFrame:
