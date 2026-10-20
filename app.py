@@ -13,6 +13,7 @@ st.set_page_config(page_title="Comparateur de vols", page_icon="✈️", layout=
 page = st.navigation([
     st.Page("pages_app/page_catalogue.py", title="Catalogue (1 an)", icon="📅", default=True),
     st.Page("pages_app/page_recherche.py", title="Recherche détaillée", icon="🔎"),
+    st.Page("pages_app/page_pays.py", title="Pays → pays", icon="🌍"),
 ])
 
 # --- Compte Google (commun aux deux pages) : prix réservés aux comptes connectés ---

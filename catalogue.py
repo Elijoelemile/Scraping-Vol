@@ -213,21 +213,25 @@ class GoogleFlights:
             return {}
         return {j[0]: (j[1], j[2][0][1]) for j in data[1] if j[1] and j[2] and j[2][0] and j[2][0][1]}
 
-    async def vols(self, t, ville: bool = False) -> list[dict]:
+    async def vols(self, t, ville: bool = False, lieux: dict | None = None) -> list[dict]:
         """Liste des vols d'un trajet à une date (GetShoppingResults), au format de google_flights_scraper.
 
         ville=True : cherche depuis/vers tous les aéroports des deux villes (ex. Paris = CDG + Orly), comme
         quand on tape « Paris » sur Google Flights.
+        lieux : {code: (identifiant Google, type)} pour imposer un lieu, ex. un pays (type 5) : t.origine et
+        t.destination sont alors des identifiants de pays, et chaque vol porte sa ville et son aéroport réels.
         """
         from google_flights_scraper import CLASSES, search_url
 
-        mids = mids_villes([t.origine, t.destination]) if ville else {}
-        if ville and len(mids) < 2:
+        mids = mids_villes([t.origine, t.destination]) if ville and not lieux else {}
+        if ville and not lieux and len(mids) < 2:
             # Identifiant de ville inconnu : une recherche par aéroport l'apprend, puis on recommence par ville
             await self.vols(t, ville=False)
             mids = mids_villes([t.origine, t.destination])
 
         def lieu(code):
+            if lieux and code in lieux:
+                return [[[lieux[code][0], lieux[code][1]]]]
             return [[[mids[code], 4]]] if code in mids else [[[code, 0]]]
 
         def segment(a, b, jour):
@@ -287,6 +291,9 @@ class GoogleFlights:
                         "detail_escales": "; ".join(f"{x[5] or x[1]} ({duree_txt(x[0])})" for x in escales),
                         "aeroport_depart": etapes[0][4] if etapes else "",
                         "aeroport_arrivee": etapes[-1][5] if etapes else "",
+                        "code_depart": info[3], "code_arrivee": info[6],
+                        **({"ville_depart": villes.get(info[3]) or ville_fr(info[3]),
+                            "ville_arrivee": villes.get(info[6]) or ville_fr(info[6])} if lieux else {}),
                         "date_depart": jour(info[4]), "heure_depart": heure(info[5]),
                         "date_arrivee": jour(info[7]), "heure_arrivee": heure(info[8]),
                         "duree": duree_txt(info[9]), "duree_min": info[9], "prix_eur": prix,
@@ -522,6 +529,79 @@ async def collecter_ar(o: str, d: str, duree: int) -> int:
         con.executemany("INSERT INTO calendrier_ar VALUES (?, ?, ?, ?, ?, ?, ?)",
                         [(o, d, duree, j, r, p, maintenant) for j, (r, p) in prix.items()])
     return len(prix)
+
+
+_VILLES_FR = None
+
+
+def ville_fr(code: str) -> str:
+    """Nom de ville d'un aéroport : listes/*.txt (en français), sinon base airportsdata (en anglais)."""
+    global _VILLES_FR
+    if _VILLES_FR is None:
+        _VILLES_FR = {}
+        for f in sorted(Path(__file__).with_name("listes").glob("*.txt")):
+            _VILLES_FR.update(dict(lire_liste(str(f))))
+        import airportsdata
+        for c, a in airportsdata.load("IATA").items():
+            _VILLES_FR.setdefault(c, a["city"] or c)
+    return _VILLES_FR.get(code, code)
+
+
+# Types de lieux : autocomplétion Google (1 aéroport, 3 ville, 4 pays/région) -> recherche de vols (0, 4, 5)
+TYPE_RECHERCHE = {1: 0, 3: 4, 4: 5}
+
+
+async def suggestions(texte: str) -> list[dict]:
+    """Autocomplétion de Google Flights : pays, villes et aéroports correspondant au texte tapé."""
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"user-agent": UA},
+                                 cookies={"SOCS": SOCS}) as client:
+        r = await client.post("https://www.google.com/_/FlightsFrontendUi/data/batchexecute",
+                              params={"rpcids": "H028ib", "hl": "fr", "gl": "FR", "rt": "c"},
+                              data={"f.req": json.dumps([[["H028ib", json.dumps([texte, [1, 2, 3, 5, 4], None, [1, 1, 1], 1]),
+                                                           None, "generic"]]])},
+                              headers={"content-type": "application/x-www-form-urlencoded;charset=UTF-8", "x-same-domain": "1"})
+    if r.status_code == 429 or "/sorry/" in str(r.url):
+        raise Bloque()
+    ligne = next((l for l in r.text.split("\n") if l.startswith('[["wrb.fr","H028ib"')), None)
+    if not ligne or not json.loads(ligne)[0][2]:
+        return []
+    res = []
+    for groupe in json.loads(json.loads(ligne)[0][2])[0]:
+        lieu = groupe[0]  # [type, libellé, nom, description, identifiant, …]
+        res.append({"type": lieu[0], "libelle": lieu[1], "nom": lieu[2], "description": lieu[3] or "",
+                    "mid": lieu[4]})
+    return res
+
+
+async def resoudre_pays(texte: str) -> dict | None:
+    """Pays correspondant au texte (ex. « Thaïlande » -> {nom, mid}), d'après l'autocomplétion de Google."""
+    import unicodedata
+
+    def norm(x):
+        return unicodedata.normalize("NFKD", x or "").encode("ascii", "ignore").decode().lower().strip()
+    pays = [s for s in await suggestions(texte) if s["type"] == 4 and s["mid"]]
+    if not pays:
+        return None
+    exact = [p for p in pays if norm(p["nom"]) == norm(texte)]
+    return (exact or pays)[0]
+
+
+async def vols_pays(pays_depart: dict, pays_arrivee: dict, date_aller: str, date_retour: str | None = None,
+                    adultes: int = 1, classe: str = "eco") -> list[dict]:
+    """Tous les vols d'un pays vers un autre à une date (une seule recherche Google, tous aéroports confondus)."""
+    from google_flights_scraper import Trajet
+    t = Trajet(pays_depart["mid"], pays_arrivee["mid"], date_aller, date_retour, adultes, classe)
+    lieux = {t.origine: (pays_depart["mid"], 5), t.destination: (pays_arrivee["mid"], 5)}
+    gf = GoogleFlights(delai=1.0)
+    try:
+        await gf.ouvrir()
+        vols = await gf.vols(t, lieux=lieux)
+    finally:
+        await gf.fermer()
+    for v in vols:
+        v["pays_depart"], v["pays_arrivee"] = pays_depart["nom"], pays_arrivee["nom"]
+        v["source"] = "appel direct (recherche pays → pays)"
+    return vols
 
 
 def mids_villes(codes: list[str]) -> dict[str, str]:
