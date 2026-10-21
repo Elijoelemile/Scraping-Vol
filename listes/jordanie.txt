@@ -1,0 +1,4 @@
+# Aéroports de Jordanie avec vols commerciaux
+# Format : CODE;Ville
+AMM;Amman
+AQJ;Aqaba
