@@ -1,0 +1,40 @@
+# Aéroports grecs avec vols commerciaux (continent et îles) — du plus important au moins important
+# Format : CODE;Ville
+ATH;Athènes
+SKG;Thessalonique
+HER;Héraklion (Crète)
+RHO;Rhodes
+CFU;Corfou
+CHQ;La Canée (Crète)
+JTR;Santorin
+JMK;Mykonos
+KGS;Kos
+ZTH;Zante
+EFL;Céphalonie
+KLX;Kalamata
+PVK;Préveza (Lefkada)
+JSI;Skiathos
+KVA;Kavala
+VOL;Volos
+MJT;Mytilène (Lesbos)
+SMI;Samos
+JIK;Ikaria
+LXS;Lemnos
+AOK;Karpathos
+KIT;Cythère
+JKH;Chios
+KZS;Kastellorizo
+LRS;Leros
+JKL;Kalymnos
+KSJ;Kasos
+JNX;Naxos
+PAS;Paros
+MLO;Milos
+JSH;Sitia (Crète)
+IOA;Ioannina
+KSO;Kastoria
+KZI;Kozani
+AXD;Alexandroupoli
+GPA;Patras
+SKU;Skyros
+JSY;Syros
