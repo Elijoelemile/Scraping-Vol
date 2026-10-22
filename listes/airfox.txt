@@ -1,0 +1,199 @@
+# Destinations du fichier Airfox (codes ville remplacés par leurs aéroports), les plus fréquentes d'abord
+# Format : CODE;Ville
+CAI;Cairo
+DJE;Djerba
+HKT;Phuket
+MRU;Port Louis
+RAK;Marrakech
+TUN;Tunis
+ZNZ;Kiembi Samaki
+ACE;Lanzarote
+AGA;Agadir
+AMM;Amman
+AMS;Amsterdam
+ATH;Athènes
+AUH;Abu Dhabi
+AYT;Antalya
+BCN;Barcelone
+BER;Berlin
+BKK;Bangkok
+BRI;Bari
+BRU;Brussels
+BUD;Budapest
+CEB;Lapu-Lapu City
+CMB;Colombo
+CMN;Casablanca
+CNX;Chiang Mai
+CTG;Cartagena
+CUN;Cancún
+CXR;Nha Trang
+DAD;Da Nang
+DEL;New Delhi
+DSS;Dakar
+DOH;Doha
+DXB;Dubai
+FAO;Faro
+FDF;Fort-de-France
+FEZ;Fès
+FLR;Firenze
+FNC;Funchal
+FUE;Fuerteventura
+GRX;Grenade
+HAN;Hanoi
+HRG;Hurghada
+ICN;Seoul
+IST;Arnavutköy, Istanbul
+KEF;Reykjavik
+KRK;Kraków
+KUL;Kuala Lumpur
+LAS;Las Vegas
+LGK;Langkawi
+LIS;Lisbon
+LJU;Ljubljana
+LHR;London
+LGW;London
+STN;London
+LTN;London
+LCY;London
+SEN;Southend
+LPA;Grande Canarie
+MAD;Madrid
+MBA;Mombasa
+MCT;Muscat
+MEX;Mexico
+MIA;Miami
+MXP;Milan
+LIN;Milan
+BGY;Bergamo
+MIR;Monastir
+MLA;Luqa
+MLE;Malé
+MUC;Munich
+JFK;New York
+EWR;Newark
+LGA;New York
+OPO;Porto
+OSL;Oslo
+PDL;Ponta Delgada
+PQC;Duong Dong
+PRG;Prague
+PRI;Praslin Island
+PTP;Pointe-a-Pitre Le Raizet
+PTY;Tocumen
+RBA;Rabat
+GIG;Rio De Janeiro
+SDU;Rio De Janeiro
+FCO;Rome
+CIA;Roma
+RUN;St Denis
+SDQ;Saint-Domingue
+SEZ;Mahe Island
+SFO;San Francisco
+SGN;Ho Chi Minh City
+SHJ;Sharjah
+SJO;San Jose
+SSA;Salvador
+STI;Santiago
+SVQ;Séville
+TAS;Tashkent
+TFN;Tenerife (Nord)
+TFS;Tenerife (Sud)
+TNG;Tanger
+HND;Tokyo
+NRT;Tokyo
+USM;Koh Samui
+VCE;Venezia
+VIE;Vienna
+YUL;Dorval
+YYZ;Mississauga
+YTZ;Toronto
+DPS;Denpasar-Bali Island
+VIL;Dakhla
+DUB;Dublin
+SID;Sal
+VXE;Mindelo (São Vicente)
+ERH;Errachidia
+SXM;Saint Martin
+PEN;Penang
+PUJ;Punta Cana
+VAR;Varna
+RUH;Riyadh
+LXR;Luxor
+MBJ;Montego Bay
+CAG;Cagliari
+SLL;Salalah
+KBV;Krabi
+PMO;Palermo
+PMI;Palma de Majorque
+NAP;Napoli
+RAI;Praia
+ESU;Essaouira
+CTA;Catania
+DBV;Dubrovnik
+SSH;Sharm el-Sheikh
+AGP;Malaga
+AJA;Ajaccio
+ALC;Alicante
+BIA;Bastia
+CFU;Corfou
+CHQ;La Canée (Crète)
+CLY;Calvi
+FSC;Figari
+HER;Héraklion (Crète)
+IBZ;Ibiza
+JTR;Santorin
+LCA;Larnaca
+LEI;Almería
+MAH;Minorque
+RHO;Rhodes
+SKG;Thessalonique
+SPU;Split
+TIA;Tirana
+VLC;Valence
+ADB;Izmir
+KGS;Kos
+TIV;Tivat
+TPE;Taipei
+BJV;Bodrum
+LAX;Los Angeles
+OZZ;Ouarzazate
+OLB;Olbia
+JMK;Mykonos
+SIN;Singapore
+PAS;Paros
+RVN;Rovaniemi
+ZTH;Zante
+LLA;Lulea
+BVC;Boa Vista
+SLU;Castries
+SPX;Giza
+EDI;Edinburgh
+POP;Puerto Plata
+KTT;Kittila
+TOS;Tromsø
+YQB;Quebec City
+BDS;Brindisi
+INN;Innsbruck
+PXO;Porto Santo
+PFO;Paphos
+MSY;New Orleans
+CPH;Copenhagen
+EZE;Ezeiza
+MNL;Manila
+ORK;Cork
+PUY;Pula
+TOE;Tozeur
+RMF;Marsa Alam
+LIR;Liberia
+BSZ;Bishkek
+SOF;Sofia
+TGD;Podgorica
+DLM;Dalaman
+AZS;Samaná
+BLQ;Bologna
+SUF;Lamezia Terme
+MJT;Mytilène (Lesbos)
+SXB;Strasbourg
+KLX;Kalamata
+BJL;Banjul
+RIX;Riga

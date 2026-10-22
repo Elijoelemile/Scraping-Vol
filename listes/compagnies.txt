@@ -1,0 +1,89 @@
+# Compagnies proposées dans le filtre « Compagnies » du catalogue : celles du fichier Airfox,
+# les plus fréquentes d'abord — Format : CODE;Nom
+TO;Transavia
+VY;Vueling
+FR;Ryanair
+EY;Etihad
+U2;easyJet
+AF;Air France
+TP;Tap Air Portugal
+LH;Lufthansa
+QR;Qatar Airways
+AA;American
+UX;Air Europa
+AT;Royal Air Maroc
+A3;Aegean
+VN;Vietnam Airlines
+TX;Air Caraibes
+TK;Turkish Airlines
+GF;Gulf Air
+LX;SWISS
+VF;AJet
+SS;Corsair
+MH;Malaysia Airlines
+BA;British Airways
+EK;Emirates
+XK;Air Corsica
+TS;Air Transat
+AZ;ITA
+OS;Austrian
+IB;Iberia
+KL;KLM
+AI;Air India
+AV;Avianca
+AC;Air Canada
+LO;LOT
+KQ;Kenya Airways
+RJ;Royal Jordanian
+PC;Pegasus
+FI;Icelandair
+SV;Saudia
+UA;United
+CX;Cathay Pacific
+B6;JetBlue
+XQ;SunExpress
+BR;EVA Air
+TU;Air Tunisie
+DY;Norwegian
+MS;EgyptAir
+GQ;Sky Express
+CA;Air China
+BF;French bee
+TG;THAI
+VS;Virgin Atlantic
+SN;Brussels Airlines
+AY;Finnair
+DE;Condor
+S4;Azores Airlines
+OU;Croatia Airlines
+JU;Air Serbia
+W4;Wizz Air Malta
+W6;Wizz Air
+QS;Smartwings
+KM;KM Malta Airlines
+WB;RwandAir
+CZ;China Southern
+MU;China Eastern
+DL;Delta
+UU;Air Austral
+SQ;Singapore Airlines
+V7;Volotea
+ET;Ethiopian
+JL;Japan Airlines
+KE;Korean Air
+OZ;Asiana Airlines
+UL;SriLankan Airlines
+BJ;Nouvelair
+SM;Air Cairo
+WY;Oman Air
+FB;Bulgaria Air
+SK;Scandinavian Airlines
+MK;Air Mauritius
+HC;Air Senegal
+D8;Norwegian Air Sweden
+WS;WestJet
+X1;Hahn Air
+TB;TUI fly
+BT;Air Baltic
+VR;Cabo Verde Airlines
+CI;China Airlines

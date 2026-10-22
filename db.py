@@ -55,14 +55,17 @@ CREATE TABLE IF NOT EXISTS vols (
     prix_eur         INTEGER,
     co2_kg           INTEGER,
     remarque         TEXT,
-    logo             TEXT              -- URL du logo de la compagnie (images Google)
+    logo             TEXT,             -- URL du logo de la compagnie (images Google)
+    code_compagnie   TEXT,             -- code IATA (VY, AF…) ; plusieurs compagnies : AF/DL
+    bagage           INTEGER           -- bagage cabine inclus : 1 = True, 0 = False
 );
 CREATE INDEX IF NOT EXISTS idx_vols_recherche ON vols (recherche_id);
 """
 
 COLONNES_VOLS = ["ville_depart", "ville_arrivee", "compagnies", "operateur", "escales", "detail_escales",
                  "aeroport_depart", "aeroport_arrivee", "date_depart", "heure_depart", "date_arrivee",
-                 "heure_arrivee", "duree", "duree_min", "prix_eur", "co2_kg", "remarque", "logo"]
+                 "heure_arrivee", "duree", "duree_min", "prix_eur", "co2_kg", "remarque", "logo",
+                 "code_compagnie", "bagage"]
 CLE_TRAJET = ["origine", "destination", "date_aller", "date_retour", "adultes", "classe"]
 
 
@@ -71,8 +74,10 @@ def connexion(path: Path = DB_PATH) -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(SCHEMA)
     # Mise à niveau des bases créées avant l'ajout des logos
-    if "logo" not in {r[1] for r in con.execute("PRAGMA table_info(vols)")}:
-        con.execute("ALTER TABLE vols ADD COLUMN logo TEXT")
+    colonnes = {r[1] for r in con.execute("PRAGMA table_info(vols)")}
+    for nom, type_ in (("logo", "TEXT"), ("code_compagnie", "TEXT"), ("bagage", "INTEGER")):
+        if nom not in colonnes:  # mise à niveau des bases créées avant l'ajout de ces colonnes
+            con.execute(f"ALTER TABLE vols ADD COLUMN {nom} {type_}")
     return con
 
 
