@@ -1,11 +1,5 @@
-# Destinations du fichier Airfox (codes ville remplacés par leurs aéroports), les plus fréquentes d'abord
+# Destinations de la donnée chargée (fichier Airfox), les plus fréquentes d'abord
 # Format : CODE;Ville
-CAI;Cairo
-DJE;Djerba
-HKT;Phuket
-MRU;Port Louis
-RAK;Marrakech
-TUN;Tunis
 ZNZ;Kiembi Samaki
 ACE;Lanzarote
 AGA;Agadir
@@ -20,6 +14,7 @@ BKK;Bangkok
 BRI;Bari
 BRU;Brussels
 BUD;Budapest
+CAI;Cairo
 CEB;Lapu-Lapu City
 CMB;Colombo
 CMN;Casablanca
@@ -29,8 +24,10 @@ CUN;Cancún
 CXR;Nha Trang
 DAD;Da Nang
 DEL;New Delhi
+DJE;Djerba
 DSS;Dakar
 DOH;Doha
+DPS;Denpasar-Bali Island
 DXB;Dubai
 FAO;Faro
 FDF;Fort-de-France
@@ -40,6 +37,7 @@ FNC;Funchal
 FUE;Fuerteventura
 GRX;Grenade
 HAN;Hanoi
+HKT;Phuket
 HRG;Hurghada
 ICN;Seoul
 IST;Arnavutköy, Istanbul
@@ -68,6 +66,7 @@ BGY;Bergamo
 MIR;Monastir
 MLA;Luqa
 MLE;Malé
+MRU;Port Louis
 MUC;Munich
 JFK;New York
 EWR;Newark
@@ -80,6 +79,7 @@ PRG;Prague
 PRI;Praslin Island
 PTP;Pointe-a-Pitre Le Raizet
 PTY;Tocumen
+RAK;Marrakech
 RBA;Rabat
 GIG;Rio De Janeiro
 SDU;Rio De Janeiro
@@ -99,18 +99,18 @@ TAS;Tashkent
 TFN;Tenerife (Nord)
 TFS;Tenerife (Sud)
 TNG;Tanger
+TUN;Tunis
 HND;Tokyo
 NRT;Tokyo
-USM;Koh Samui
 VCE;Venezia
 VIE;Vienna
 YUL;Dorval
 YYZ;Mississauga
 YTZ;Toronto
-DPS;Denpasar-Bali Island
-VIL;Dakhla
+USM;Koh Samui
 DUB;Dublin
 SID;Sal
+VIL;Dakhla
 VXE;Mindelo (São Vicente)
 ERH;Errachidia
 SXM;Saint Martin
@@ -119,10 +119,10 @@ PUJ;Punta Cana
 VAR;Varna
 RUH;Riyadh
 LXR;Luxor
-MBJ;Montego Bay
 CAG;Cagliari
-SLL;Salalah
+MBJ;Montego Bay
 KBV;Krabi
+SLL;Salalah
 PMO;Palermo
 PMI;Palma de Majorque
 NAP;Napoli
@@ -138,10 +138,10 @@ BIA;Bastia
 CFU;Corfou
 CHQ;La Canée (Crète)
 CLY;Calvi
-FSC;Figari
 HER;Héraklion (Crète)
 IBZ;Ibiza
 JTR;Santorin
+KGS;Kos
 LCA;Larnaca
 LEI;Almería
 MAH;Minorque
@@ -149,51 +149,52 @@ RHO;Rhodes
 SKG;Thessalonique
 SPU;Split
 TIA;Tirana
-VLC;Valence
-ADB;Izmir
-KGS;Kos
 TIV;Tivat
-TPE;Taipei
+VLC;Valence
+FSC;Figari
+ADB;Izmir
 BJV;Bodrum
+TPE;Taipei
 LAX;Los Angeles
+NAS;Nassau
 OZZ;Ouarzazate
 OLB;Olbia
 JMK;Mykonos
 SIN;Singapore
 PAS;Paros
+BVC;Boa Vista
 RVN;Rovaniemi
 ZTH;Zante
 LLA;Lulea
-BVC;Boa Vista
 SLU;Castries
-SPX;Giza
-EDI;Edinburgh
 POP;Puerto Plata
+EDI;Edinburgh
 KTT;Kittila
+SPX;Giza
 TOS;Tromsø
 YQB;Quebec City
+PXO;Porto Santo
 BDS;Brindisi
 INN;Innsbruck
-PXO;Porto Santo
 PFO;Paphos
 MSY;New Orleans
+PUY;Pula
 CPH;Copenhagen
 EZE;Ezeiza
 MNL;Manila
 ORK;Cork
-PUY;Pula
 TOE;Tozeur
 RMF;Marsa Alam
 LIR;Liberia
 BSZ;Bishkek
 SOF;Sofia
 TGD;Podgorica
-DLM;Dalaman
 AZS;Samaná
+DLM;Dalaman
 BLQ;Bologna
 SUF;Lamezia Terme
 MJT;Mytilène (Lesbos)
 SXB;Strasbourg
-KLX;Kalamata
 BJL;Banjul
+KLX;Kalamata
 RIX;Riga

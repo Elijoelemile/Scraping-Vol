@@ -17,9 +17,11 @@ COULEUR = "#2a78d6"
 COMPAGNIES = ["VY", "UX"]  # compagnies par défaut du tableau de toutes les dates (Vueling, Air Europa)
 LISTE_COMPAGNIES = Path(__file__).parent.parent / "listes" / "compagnies.txt"  # codes proposés (ceux d'Airfox)
 MAX_LIGNES = 600_000  # taille maximale du tableau de toutes les dates
-MAX_DIRECT = 50  # recherches en direct par clic (≈ 10 s chacune) : au-delà, risque de blocage par Google
+MAX_DIRECT = 400  # recherches en direct par clic (4 à la fois, ≈ 1,4 s chacune) : au-delà, risque de blocage
+LISTE_AIRFOX = Path(__file__).parent.parent / "listes" / "airfox.txt"  # destinations actualisées par défaut
 A_COMPLETER = "à compléter"
 PAS_DE_VOL = "pas de vol"
+AUCUN_VOL = "aucun vol trouvé"  # date recherchée en direct, aucun vol depuis cet aéroport
 # Aéroports de Paris (vols commerciaux) ; Beauvais et Vatry sont vendus comme « Paris » par les low-cost
 PARIS = ["CDG", "ORY", "BVA", "XCR"]
 NOMS_AEROPORTS = {"CDG": "Paris-Charles de Gaulle", "ORY": "Paris-Orly", "BVA": "Paris-Beauvais",
@@ -127,7 +129,10 @@ if destination is None:
                               format_func=lambda c: f"{c} — {noms_cies.get(c, c)}"
                                                     + (" ✓" if c in collectees else ""),
                               help="✓ = calendrier collecté. Les autres compagnies s'affichent « à compléter » "
-                                   "tant que leur collecte n'a pas été faite.") or collectees
+                                   "tant que leur collecte n'a pas été faite.")
+        # Aucune compagnie choisie : une ligne par date, sans les colonnes propres à une compagnie
+        sans_compagnie = not cies
+        cies = cies or collectees  # les compagnies collectées servent quand même à nommer la moins chère
         # Filtres du tableau ; tri par date d'abord : chaque jour, toutes les villes d'arrivée se suivent
         avec_prix_cat = dests[dests["nb_jours_prix"].fillna(0) > 0]
         villes = g1.multiselect("Villes d'arrivée", sorted(avec_prix_cat["ville_arrivee"].dropna().unique()),
@@ -146,31 +151,42 @@ if destination is None:
         dates = pd.concat([catalogue.calendrier_compagnies(o, cies).assign(origine=o) for o in departs],
                           ignore_index=True)
         dates = dates.merge(avec_prix_cat[["origine", "destination"]], on=["origine", "destination"])
-        if avec_vol:
-            dates = dates[pd.to_numeric(dates["prix_compagnie"], errors="coerce").notna() | ~dates["collecte_compagnie"]]
-        # Période affichée (par défaut toute l'année)
-        h1, h2 = st.columns([3, 3])
+        # Période affichée (par défaut toute l'année), type de trajet et durée du séjour
+        h1, h3, h4, h2 = st.columns([3, 2, 2, 2])  # « Nuits » assez large pour afficher les boutons − et +
         periode = h1.date_input("Dates de départ", value=(), min_value=date.today(), format="DD/MM/YYYY",
                                 help="Choisissez une date de début puis de fin ; vide = toutes les dates")
+        # le choix est gardé d'une page à l'autre (Streamlit oublie les widgets d'une page quittée)
+        choix_precedent = st.session_state.get("nuits_catalogue")
+        aller_retour_tab = h3.radio("Type de trajet", ["Aller simple", "Aller-retour"], horizontal=True,
+                                    index=1 if choix_precedent else 0, key="type_toutes_dates") == "Aller-retour"
+        nuits_tab = h4.number_input("Nombre de nuits", 1, 60, choix_precedent or 7, disabled=not aller_retour_tab,
+                                    key="nuits_toutes_dates",
+                                    help="Durée du séjour : date de retour = date de départ + nuits")
+        nuits_ar = int(nuits_tab) if aller_retour_tab else None
+        st.session_state["nuits_catalogue"] = nuits_ar  # repris par la page Comparatif Airfox
         if len(periode) == 2:
             dates = dates[(dates["date"] >= periode[0].isoformat()) & (dates["date"] <= periode[1].isoformat())]
         elif len(periode) == 1:
             dates = dates[dates["date"] == periode[0].isoformat()]
-        # Actualisation en direct : une vraie recherche Google par destination et par date des lignes affichées
+        # Actualisation en direct : une vraie recherche Google par destination et par date des lignes affichées.
+        # Sans ville choisie : seulement les destinations du fichier Airfox (≈ 190 par date, ~4-5 min)
+        airfox = {c for c, _ in catalogue.lire_liste(str(LISTE_AIRFOX))} if LISTE_AIRFOX.exists() else set()
         a_actualiser = sorted({(d, j) for d, j in zip(dates["destination"], dates["date"])
-                               if j >= date.today().isoformat()})
+                               if j >= date.today().isoformat() and (villes or not airfox or d in airfox)})
         trop = len(a_actualiser) > MAX_DIRECT
+        duree_min = max(1, round(len(a_actualiser) * 1.4 / 60))  # ≈ 4 recherches en parallèle
         h2.write("")
-        if h2.button(f"🔄 Actualiser en direct ({len(a_actualiser)} recherche(s), ~{len(a_actualiser) * 10 // 60 + 1} min)",
+        if h2.button(f"🔄 Actualiser ({len(a_actualiser)} recherche(s), ~{duree_min} min)",
                      disabled=trop or not a_actualiser,
-                     help=(f"Plus de {MAX_DIRECT} recherches : filtrez par villes d'arrivée ou par dates." if trop else
-                           "Interroge Google Flights maintenant pour chaque destination et date affichée : prix, "
-                           "compagnie la moins chère et bagage du moment.")):
+                     help=(f"Plus de {MAX_DIRECT} recherches : choisissez moins de dates." if trop else
+                           "Interroge Google Flights maintenant (4 recherches à la fois) pour chaque destination "
+                           + ("choisie" if villes else "du fichier Airfox") + " et chaque date affichée : prix, "
+                           "compagnie la moins chère, horaires et bagage du moment.")):
             with st.status("Recherche en direct sur Google Flights…", expanded=True) as statut:
                 barre = st.progress(0.0)
                 try:
                     n = asyncio.run(catalogue.actualiser_direct(
-                        a_actualiser, departs,
+                        a_actualiser, departs, nuits=nuits_ar,
                         on_progress=lambda i, total, msg: barre.progress(i / total, text=f"{i}/{total} : {msg}")))
                     statut.update(label=f"Actualisé : {n}/{len(a_actualiser)} avec vols", state="complete")
                 except catalogue.Bloque:
@@ -178,17 +194,33 @@ if destination is None:
                                   state="error")
                     st.stop()
             st.rerun()
+        if nuits_ar:
+            # Aller-retour : les prix aller simple ne valent plus. Prix le plus bas = calendrier aller-retour s'il a
+            # été collecté ; prix et bagage de chaque compagnie = recherches en direct de cet aller-retour
+            dates["date_retour"] = catalogue._retours(dates["date"], nuits_ar)
+            dates = dates.drop(columns=["prix_compagnie", "bagage", "collecte_compagnie"]).merge(
+                catalogue.calendrier_ar_origines(departs, nuits_ar), how="left", on=["origine", "destination", "date"])
+            dates["prix"], dates["collecte_le"] = dates["prix_ar"], dates["collecte_ar"]
+            vj = catalogue.vols_jour_tableau(departs, nuits_ar)
+            cherchees = set(zip(vj["destination"], vj["date"]))
+            dates = dates.merge(vj[vj["origine"] != "-"][["origine", "destination", "date", "compagnie", "prix", "bagage"]]
+                                .rename(columns={"compagnie": "code_compagnie", "prix": "prix_compagnie"}),
+                                how="left", on=["origine", "destination", "date", "code_compagnie"])
+            # aller-retour recherché ce jour-là : une compagnie absente des résultats n'a pas de vol
+            dates["collecte_compagnie"] = [(d, j) in cherchees for d, j in zip(dates["destination"], dates["date"])]
+        if avec_vol and not sans_compagnie:
+            dates = dates[pd.to_numeric(dates["prix_compagnie"], errors="coerce").notna() | ~dates["collecte_compagnie"]]
         dates = dates.sort_values(["date", "ville_arrivee", "origine", "code_compagnie"], ignore_index=True)
         st.caption(f"{len(dates):,} lignes".replace(",", " ")
                    + f" ({len(departs)} aéroport(s) de départ × {dates['destination'].nunique()} destinations × dates"
-                   f" × {len(cies)} compagnie(s)). "
-                   "« Prix le plus bas » = toutes compagnies confondues (catalogue). « Prix de la compagnie » = prix de "
+                   + ("). " if sans_compagnie else f" × {len(cies)} compagnie(s)). ")
+                   + "« Prix le plus bas » = toutes compagnies confondues (catalogue). « Prix de la compagnie » = prix de "
                    "cette compagnie ce jour-là ; « Bagage » = bagage cabine inclus sur son vol le moins cher du "
                    f"trajet. « {PAS_DE_VOL} » : la compagnie ne propose pas de vol ce jour-là ; « {A_COMPLETER} » : "
                    "trajet pas encore collecté pour cette compagnie.")
         # Dates recherchées une à une (catalogue.py jour), plus récentes que le calendrier : leur prix le plus bas
         # et leur date de collecte remplacent ceux du catalogue, et elles nomment la compagnie la moins chère
-        du_jour = catalogue.moins_cher_du_jour(departs)
+        du_jour = catalogue.moins_cher_du_jour(departs, nuits_ar)
         du_jour = du_jour.rename(columns={"heure_depart": "heure_depart_mc", "heure_arrivee": "heure_arrivee_mc",
                                           "duree": "duree_mc"})
         dates = dates.merge(du_jour, how="left", on=["origine", "destination", "date"])
@@ -208,30 +240,61 @@ if destination is None:
                                 for k, nom, code in zip(zip(dates["origine"], dates["destination"], dates["date"]),
                                                         dates["nom_moins_cher"], dates["code_moins_cher"])],
                                index=dates.index)
+        # Bagage cabine de la compagnie la moins chère : recherche d'une date, sinon la compagnie collectée la moins chère
+        bagage_egal = (egal.dropna(subset=["c"]).assign(b=pd.to_numeric(egal["bagage"], errors="coerce"))
+                       .dropna(subset=["b"]).groupby(["origine", "destination", "date"])["b"].first())
+        bagage_mc = pd.Series([b if pd.notna(b) else bagage_egal.get(k) for k, b in zip(
+            zip(dates["origine"], dates["destination"], dates["date"]),
+            pd.to_numeric(dates["bagage_moins_cher"], errors="coerce"))], index=dates.index)
+        # Date recherchée (bouton « Actualiser ») mais aucun vol trouvé depuis cet aéroport : on le dit,
+        # au lieu de « à compléter » qui laisserait croire que rien n'a été recherché
+        cherchees_jour = set(zip(*[catalogue.vols_jour_tableau(departs, nuits_ar)[c] for c in ("destination", "date")]))
+        sans_resultat = pd.Series([(d, j) in cherchees_jour and not isinstance(n, str) for d, j, n in zip(
+            dates["destination"], dates["date"], dates["nom_moins_cher"])], index=dates.index)
+        moins_cher = moins_cher.mask(sans_resultat & (moins_cher == "autre compagnie"), AUCUN_VOL)
         tableau = pd.DataFrame({
             "Départ": [f"{nom_aeroport(o, origines[o])} ({o})" for o in dates["origine"]],
             "Ville d'arrivée": dates["ville_arrivee"], "Code": dates["destination"],
             "Pays": dates["destination"].map(pays_aeroport),
             "Date": pd.to_datetime(dates["date"]).dt.strftime("%d/%m/%Y"),
+            **({"Date de retour": pd.to_datetime(dates["date_retour"]).dt.strftime("%d/%m/%Y")} if nuits_ar else {}),
             "Prix le plus bas (toutes compagnies)": dates["prix"],
             "Compagnie la moins chère": moins_cher,
             # horaires du vol le moins cher (dates recherchées en direct ou par « catalogue.py jour »)
             "Heure de départ": dates["heure_depart_mc"].fillna("—"),
             "Heure d'arrivée": dates["heure_arrivee_mc"].fillna("—"),
             "Durée": dates["duree_mc"].fillna("—"),
+            "Bagage (moins chère)": bagage_mc.map({1: "True", 0: "False"}).fillna(A_COMPLETER)
+                                    .mask(sans_resultat & bagage_mc.isna(), AUCUN_VOL),
             "Code compagnie": dates["code_compagnie"],
             # une seule compagnie choisie : la colonne porte son nom (ex. « Prix Air Europa »)
             (f"Prix {noms_cies.get(cies[0], cies[0])}" if len(cies) == 1 else "Prix de la compagnie"): prix_comp.map(lambda v: A_COMPLETER if pd.isna(v) else f"{v:.0f} €").mask(sans_vol, PAS_DE_VOL),
             "Bagage": bagage.map({1: "True", 0: "False"}).fillna(A_COMPLETER).mask(sans_vol, PAS_DE_VOL),
-            "Collecté le": pd.to_datetime(dates["collecte_le"]).dt.strftime("%d/%m/%Y %H:%M"),
+            "Collecté le": pd.to_datetime(dates["collecte_le"]).dt.strftime("%d/%m/%Y %H:%M").fillna("—"),
+            "_aucun_vol": sans_resultat,  # colonne de travail, retirée avant l'affichage
         })
+        if sans_compagnie:  # une ligne par date : sans les colonnes d'une compagnie, « Bagage » = celui de la moins chère
+            tableau = (tableau.drop(columns=[c for c in tableau.columns
+                                             if c in ("Code compagnie", "Bagage") or c.startswith("Prix ")
+                                             and c != "Prix le plus bas (toutes compagnies)"])
+                       .rename(columns={"Bagage (moins chère)": "Bagage"})
+                       .drop_duplicates(["Départ", "Code", "Date"], ignore_index=True))
+        else:
+            tableau = tableau.drop(columns="Bagage (moins chère)")
         # lazy=False : au-delà de 150 000 lignes Streamlit charge le tableau par morceaux, liés à la session du
         # navigateur ; après une reconnexion, ces morceaux échouent (« Failed to load data »). On envoie tout
         # d'un coup, ce qui garde aussi la recherche et le téléchargement CSV du tableau.
-        st.dataframe(tableau, hide_index=True, width="stretch", lazy=False,
-                     column_config={"Prix le plus bas (toutes compagnies)": st.column_config.NumberColumn(
-                         format="%d €", help="Prix le plus bas ce jour-là, toutes compagnies confondues : il peut venir "
-                                             "d'une autre compagnie que celle de la ligne")})
+        PLUS_BAS = "Prix le plus bas (toutes compagnies)"
+        aide = ("Prix le plus bas ce jour-là, toutes compagnies confondues : il peut venir d'une autre compagnie que "
+                f"celle de la ligne. « {A_COMPLETER} » : pas encore recherché (ex. aller-retour non actualisé).")
+        if tableau[PLUS_BAS].isna().any():  # prix inconnus : « à compléter » plutôt que « None »
+            tableau[PLUS_BAS] = [(AUCUN_VOL if vide else A_COMPLETER) if pd.isna(v) else f"{v:.0f} €"
+                                 for v, vide in zip(tableau[PLUS_BAS], tableau["_aucun_vol"])]
+            colonne_prix = st.column_config.TextColumn(help=aide)
+        else:
+            colonne_prix = st.column_config.NumberColumn(format="%d €", help=aide)
+        st.dataframe(tableau.drop(columns="_aucun_vol"), hide_index=True, width="stretch", lazy=False,
+                     column_config={PLUS_BAS: colonne_prix})
         st.stop()
     with st.expander(f"Tous les trajets du catalogue ({len(vue)} : {dests['origine'].nunique()} aéroport(s) de départ "
                      f"vers {dests['destination'].nunique()} aéroport(s) d'arrivée), du moins cher au plus cher"):

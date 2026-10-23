@@ -11,9 +11,12 @@ import session_google
 st.set_page_config(page_title="Comparateur de vols", page_icon="✈️", layout="wide")
 
 page = st.navigation([
+    st.Page("pages_app/page_donnees.py", title="Charger la donnée", icon="📂"),
     st.Page("pages_app/page_catalogue.py", title="Catalogue (1 an)", icon="📅", default=True),
     st.Page("pages_app/page_recherche.py", title="Recherche détaillée", icon="🔎"),
     st.Page("pages_app/page_pays.py", title="Pays → pays", icon="🌍"),
+    st.Page("pages_app/page_airfox.py", title="Comparatif Airfox vs Google Flights", icon="⚖️"),
+    st.Page("pages_app/page_rapport.py", title="Rapport Excel", icon="📊"),
 ])
 
 

@@ -113,7 +113,8 @@ CREATE TABLE IF NOT EXISTS vols_jour (   -- recherche d'une date : vol le moins 
     heure_depart  TEXT,             -- horaires du vol le moins cher de la compagnie
     heure_arrivee TEXT,             -- « 21:30 », « 06:40 (+1) » si l'on arrive le lendemain
     duree         TEXT,
-    PRIMARY KEY (origine, destination, date, compagnie)
+    date_retour   TEXT NOT NULL DEFAULT '',   -- '' = aller simple ; sinon tarif aller-retour
+    PRIMARY KEY (origine, destination, date, date_retour, compagnie)
 );
 CREATE TABLE IF NOT EXISTS compagnies_trajets (     -- bilan de la collecte par compagnie (0 jour = ne dessert pas)
     origine     TEXT NOT NULL,
@@ -132,6 +133,10 @@ CREATE TABLE IF NOT EXISTS compagnies_trajets (     -- bilan de la collecte par 
 from google_flights_scraper import Bloque  # noqa: E402  (page « sorry » de Google : adresse IP bloquée)
 
 
+class ErreurGoogle(Exception):
+    """Google n'a renvoyé que des erreurs pour une recherche : on ne sait rien (surtout pas « aucun vol »)."""
+
+
 class PlageInvalide(Exception):
     """Plage de dates refusée (au-delà de l'horizon de réservation ou trop longue)."""
 
@@ -144,6 +149,12 @@ def connexion(path: Path = DB_PATH) -> sqlite3.Connection:
     for nom in ("heure_depart", "heure_arrivee", "duree"):
         if nom not in colonnes:
             con.execute(f"ALTER TABLE vols_jour ADD COLUMN {nom} TEXT")
+    if "date_retour" not in colonnes:  # la date de retour entre dans la clé : la table est recréée
+        with con:
+            con.execute("ALTER TABLE vols_jour RENAME TO vols_jour_ancien")
+            con.executescript(SCHEMA)
+            con.execute("INSERT INTO vols_jour SELECT *, '' FROM vols_jour_ancien")
+            con.execute("DROP TABLE vols_jour_ancien")
     return con
 
 
@@ -157,6 +168,7 @@ class GoogleFlights:
         self.appels = 0
         self.echecs_suite = 0       # appels consécutifs restés en erreur après toutes les tentatives
         self._dernier = 0.0
+        self._verrou = None         # espace les appels même quand plusieurs recherches tournent en parallèle
         self.at = None              # jeton anti-falsification exigé par Google pour un compte connecté
         biscuits = {"SOCS": SOCS} | (session_google.cookies() if connecte else {})
         self.connecte = "SID" in biscuits
@@ -178,10 +190,12 @@ class GoogleFlights:
         await self.client.aclose()
 
     async def _attendre(self):
-        pause = self.delai * random.uniform(0.7, 1.3) - (time.monotonic() - self._dernier)
-        if pause > 0:
-            await asyncio.sleep(pause)
-        self._dernier = time.monotonic()
+        self._verrou = self._verrou or asyncio.Lock()
+        async with self._verrou:  # un seul appel part à la fois : pas de rafale en parallèle
+            pause = self.delai * random.uniform(0.7, 1.3) - (time.monotonic() - self._dernier)
+            if pause > 0:
+                await asyncio.sleep(pause)
+            self._dernier = time.monotonic()
 
     async def rpc(self, nom: str, inner: list, essais: int = 8):
         """Appel avec nouvelles tentatives : ~1 réponse sur 2 est une erreur interne (code 13) passagère."""
@@ -357,6 +371,8 @@ class GoogleFlights:
         for passe in range(3):
             data = await self.rpc("GetShoppingResults", requete, essais=12)
             if not data:
+                if passe == 0:  # aucune réponse exploitable : ce n'est pas « aucun vol »
+                    raise ErreurGoogle()
                 break
             nouveaux = analyser(data)
             if not resultats:
@@ -599,18 +615,22 @@ PARIS_MID = "/m/05qtj"  # identifiant Google de la ville de Paris (CDG + Orly + 
 PARIS_AEROPORTS = ["CDG", "ORY", "BVA", "XCR"]
 
 
-async def rechercher_jour(gf: GoogleFlights, d: str, jour: str, origines: list[str]) -> bool:
+async def rechercher_jour(gf: GoogleFlights, d: str, jour: str, origines: list[str], retour: str | None = None) -> bool:
     """Recherche en direct des vols vers d à une date depuis ces aéroports (Paris : une seule recherche « Paris »,
     comme sur Google Flights) ; enregistre le vol le moins cher de chaque compagnie et de chaque départ dans
-    vols_jour. Renvoie True si des vols ont été trouvés. Lève Bloque si Google bloque."""
+    vols_jour. retour : date de retour (tarif aller-retour). Renvoie True si des vols ont été trouvés.
+    Lève Bloque si Google bloque."""
     from google_flights_scraper import Trajet
     recherches = [("PAR", PARIS_AEROPORTS)] if set(origines) & set(PARIS_AEROPORTS) else []
     recherches += [(o, [o]) for o in origines if o not in PARIS_AEROPORTS]
     meilleurs = {}  # (départ, compagnie) -> vol le moins cher
     for o, codes in recherches:
-        vols = await gf.vols(Trajet(o, d, jour), lieux={"PAR": (PARIS_MID, 4)} if o == "PAR" else None)
-        if not vols and gf.echecs_suite >= 1:
-            raise Bloque()  # erreur 13 persistante : blocage silencieux
+        try:
+            vols = await gf.vols(Trajet(o, d, jour, retour), lieux={"PAR": (PARIS_MID, 4)} if o == "PAR" else None)
+        except ErreurGoogle:
+            if gf.echecs_suite >= 3:
+                raise Bloque()  # erreurs à la suite : blocage silencieux de Google
+            raise
         for v in vols:
             # aéroports parfois donnés par leur nom (« Aéroport de Paris-Orly ») : on retrouve le code
             depart = next((c for c in codes if _meme_aeroport(v.get("aeroport_depart"), c)), None)
@@ -622,14 +642,15 @@ async def rechercher_jour(gf: GoogleFlights, d: str, jour: str, origines: list[s
     cherches = [c for _, codes in recherches for c in codes]
     maintenant = datetime.now().isoformat(timespec="seconds")
     with closing(connexion()) as con, con:
-        con.execute(f"DELETE FROM vols_jour WHERE destination = ? AND date = ?"
-                    f" AND origine IN ({','.join('?' * (len(cherches) + 1))})", (d, jour, *cherches, "-"))
-        con.executemany("INSERT INTO vols_jour VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        con.execute(f"DELETE FROM vols_jour WHERE destination = ? AND date = ? AND date_retour = ?"
+                    f" AND origine IN ({','.join('?' * (len(cherches) + 1))})", (d, jour, retour or "", *cherches, "-"))
+        con.executemany("INSERT INTO vols_jour VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         [(o, d, jour, c, v.get("compagnies"), int(v["prix_eur"]),
                           None if v.get("bagage") is None else int(v["bagage"]), maintenant,
-                          v.get("heure_depart"), _arrivee(v), v.get("duree"))
+                          v.get("heure_depart"), _arrivee(v), v.get("duree"), retour or "")
                          for (o, c), v in meilleurs.items()]
-                        or [("-", d, jour, "-", None, 0, None, maintenant, None, None, None)])  # aucun vol : marqué fait
+                        or [("-", d, jour, "-", None, 0, None, maintenant, None, None, None,
+                             retour or "")])  # aucun vol : marqué fait
     return bool(meilleurs)
 
 
@@ -642,19 +663,40 @@ def _arrivee(v: dict) -> str:
     return f"{v.get('heure_arrivee') or ''} (+{n})" if n > 0 else (v.get("heure_arrivee") or "")
 
 
-async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], delai: float = 3.0,
-                            on_progress=None) -> int:
-    """Recherches en direct pour des (destination, date) choisies dans l'application. Renvoie le nb avec vols."""
+async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], delai: float = 1.2,
+                            on_progress=None, nuits: int | None = None, parallele: int = 4) -> int:
+    """Recherches en direct pour des (destination, date) choisies dans l'application, `parallele` à la fois ;
+    nuits : aller-retour (retour nuits jours après l'aller). Renvoie le nb avec vols. Lève Bloque si Google bloque."""
     gf = GoogleFlights(delai)
-    trouvees = 0
+    places = asyncio.Semaphore(parallele)
+    bloque = asyncio.Event()
+    faites, trouvees = 0, 0
+
+    async def une(d, jour):
+        nonlocal faites, trouvees
+        async with places:
+            if bloque.is_set():
+                return
+            retour = (date.fromisoformat(jour) + timedelta(days=nuits)).isoformat() if nuits else None
+            try:
+                avec_vols = await rechercher_jour(gf, d, jour, origines, retour)
+            except Bloque:
+                bloque.set()  # inutile de continuer : les recherches suivantes seraient bloquées aussi
+                return
+            except ErreurGoogle:
+                avec_vols = False  # rien n'est enregistré pour cette date : elle garde ses anciennes valeurs
+            trouvees += avec_vols
+            faites += 1
+            if on_progress:
+                on_progress(faites, len(paires), f"{d} le {jour}")
+
     try:
         await gf.ouvrir()
-        for i, (d, jour) in enumerate(paires, 1):
-            trouvees += await rechercher_jour(gf, d, jour, origines)
-            if on_progress:
-                on_progress(i, len(paires), f"{d} le {jour}")
+        await asyncio.gather(*(une(d, j) for d, j in paires))
     finally:
         await gf.fermer()
+    if bloque.is_set():
+        raise Bloque()
     return trouvees
 
 
@@ -663,7 +705,8 @@ async def collecter_jour(jour: str, destinations: list[str], delai: float, pause
     """Pour une date : une recherche « Paris → destination » par destination (comme sur Google Flights) ;
     garde le vol le moins cher de chaque compagnie et de chaque aéroport de départ. Reprend là où elle s'est arrêtée."""
     with closing(connexion()) as con:
-        faites = {r[0] for r in con.execute("SELECT DISTINCT destination FROM vols_jour WHERE date = ?", (jour,))}
+        faites = {r[0] for r in con.execute("SELECT DISTINCT destination FROM vols_jour WHERE date = ?"
+                                             " AND date_retour = ''", (jour,))}
     a_faire = [d for d in destinations if d not in faites]
     log(f"{jour} : {len(a_faire)} destinations à rechercher depuis Paris ({len(faites)} déjà faites).")
     gf = GoogleFlights(delai)
@@ -718,7 +761,10 @@ async def completer_bagages(compagnies: list[str], delai: float, log=print) -> i
     try:
         await gf.ouvrir()
         for i, (o, d, c, jour) in enumerate(paires, 1):
-            bagage = await bagage_compagnie(gf, o, d, c, jour)
+            try:
+                bagage = await bagage_compagnie(gf, o, d, c, jour)
+            except ErreurGoogle:
+                bagage = None
             if bagage is not None:
                 trouves += 1
                 with closing(connexion()) as con, con:
@@ -1095,16 +1141,93 @@ def calendrier_combine(origines: list[str], destinations: str | list[str]) -> pd
     return (cal.sort_values(["date", "prix"]).drop_duplicates("date").reset_index(drop=True))
 
 
-def moins_cher_du_jour(origines: list[str]) -> pd.DataFrame:
-    """Recherches d'une date (vols_jour) : compagnie du vol le moins cher par départ, destination et date."""
+# Codes ville utilisés par Airfox -> aéroports collectés (Airfox part de « PAR » = tous les aéroports de Paris)
+VILLES_AIRFOX = {"PAR": PARIS_AEROPORTS, "LON": ["LHR", "LGW", "STN", "LTN", "LCY", "SEN"],
+                 "MIL": ["MXP", "LIN", "BGY"], "NYC": ["JFK", "EWR", "LGA"], "RIO": ["GIG", "SDU"],
+                 "ROM": ["FCO", "CIA"], "TYO": ["HND", "NRT"], "YMQ": ["YUL"], "YTO": ["YYZ", "YTZ"],
+                 "IZM": ["ADB"], "DKR": ["DSS"]}
+
+
+def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None) -> pd.DataFrame:
+    """Données Google Flights du catalogue au format du fichier Airfox, pour la jointure :
+    VilleDepart (PAR), VilleArrivee (code Airfox), DateAller, CodeTransporteur, Tarif, FlagBagageInclus.
+    Une ligne par date et compagnie : le tarif le plus bas parmi les aéroports de Paris (aller simple, 1 adulte).
+    Sources : calendriers par compagnie (collecter_compagnies) et recherches d'une date (vols_jour, plus récentes).
+    nuits : tarifs aller-retour (retour nuits jours après l'aller), issus des recherches d'une date seulement."""
+    vers_airfox = {a: v for v, aeroports in VILLES_AIRFOX.items() for a in aeroports if v != "PAR"}
+    aeroports = sorted({a for v in villes_arrivee for a in VILLES_AIRFOX.get(v, [v])})
+    if not aeroports:
+        return pd.DataFrame()
+    marques = ",".join("?" * len(aeroports))
+    paris = ",".join("?" * len(PARIS_AEROPORTS))
+    with closing(connexion()) as con:
+        cal = pd.read_sql_query(
+            f"SELECT c.origine, c.destination, c.date, c.compagnie, c.prix, t.bagage, c.collecte_le"
+            f" FROM calendrier_compagnie c JOIN compagnies_trajets t ON t.origine = c.origine"
+            f" AND t.destination = c.destination AND t.compagnie = c.compagnie"
+            f" WHERE c.origine IN ({paris}) AND c.destination IN ({marques}) AND c.date >= ?",
+            con, params=[*PARIS_AEROPORTS, *aeroports, date.today().isoformat()])
+        jour = pd.read_sql_query(
+            f"SELECT origine, destination, date, date_retour, compagnie, prix, bagage, collecte_le FROM vols_jour"
+            f" WHERE origine IN ({paris}) AND destination IN ({marques}) AND date >= ?",
+            con, params=[*PARIS_AEROPORTS, *aeroports, date.today().isoformat()])
+    jour = jour[jour["date_retour"] == _retours(jour["date"], nuits)].drop(columns="date_retour")
+    if nuits:  # pas de calendrier aller-retour par compagnie : seulement les recherches d'une date
+        cal = cal.iloc[0:0]
+    cal["Source"] = "calendrier de la compagnie"
+    jour["Source"] = "recherche du jour"
+    df = pd.concat([cal, jour], ignore_index=True)
+    df = df[df["compagnie"] != "-"]  # « - » : recherche faite, aucun vol
+    if df.empty:
+        return df
+    df["VilleArrivee"] = df["destination"].map(lambda a: vers_airfox.get(a, a))
+    # Pour chaque date, compagnie et ville : la source la plus récente, puis le tarif le plus bas de Paris
+    df = df.sort_values(["collecte_le", "prix"], ascending=[False, True])
+    df = df[df["collecte_le"].str[:10] == df.groupby(["VilleArrivee", "date", "compagnie"])["collecte_le"]
+            .transform("max").str[:10]]
+    df = df.sort_values("prix").drop_duplicates(["VilleArrivee", "date", "compagnie"])
+    return pd.DataFrame({
+        "VilleDepart": "PAR", "VilleArrivee": df["VilleArrivee"], "DateAller": df["date"],
+        **({"DateRetour": _retours(df["date"], nuits), "Duree": nuits} if nuits else {}),
+        "CodeTransporteur": df["compagnie"], "Tarif": df["prix"].astype(float),
+        "FlagBagageInclus": df["bagage"].map({1: True, 0: False}),
+        "AeroportDepart": df["origine"], "AeroportArrivee": df["destination"],
+        "Source": df["Source"], "CollecteLe": df["collecte_le"],
+    }).sort_values(["VilleArrivee", "DateAller", "CodeTransporteur"], ignore_index=True)
+
+
+def _retours(dates: pd.Series, nuits: int | None) -> pd.Series:
+    """Date de retour attendue pour chaque date d'aller ('' en aller simple)."""
+    if not nuits:
+        return pd.Series("", index=dates.index)
+    return (pd.to_datetime(dates) + pd.Timedelta(days=nuits)).dt.strftime("%Y-%m-%d")
+
+
+def calendrier_ar_origines(origines: list[str], nuits: int) -> pd.DataFrame:
+    """Calendriers aller-retour (toutes compagnies) déjà collectés pour ces départs et cette durée de séjour."""
+    with closing(connexion()) as con:
+        return pd.read_sql_query(
+            f"SELECT origine, destination, date, prix AS prix_ar, collecte_le AS collecte_ar FROM calendrier_ar"
+            f" WHERE duree = ? AND origine IN ({','.join('?' * len(origines))})", con, params=[nuits, *origines])
+
+
+def vols_jour_tableau(origines: list[str], nuits: int | None = None) -> pd.DataFrame:
+    """Recherches d'une date (vols_jour) en aller simple, ou en aller-retour de `nuits` nuits."""
     with closing(connexion()) as con:
         vj = pd.read_sql_query(
-            f"SELECT origine, destination, date, compagnie, nom, prix, collecte_le, heure_depart, heure_arrivee,"
-            f" duree FROM vols_jour"
-            f" WHERE origine IN ({','.join('?' * len(origines))})", con, params=origines)
+            f"SELECT * FROM vols_jour WHERE origine IN ({','.join('?' * len(origines))}) OR origine = '-'",
+            con, params=origines)  # « - » : recherche faite sans aucun vol
+    return vj[vj["date_retour"] == _retours(vj["date"], nuits)]
+
+
+def moins_cher_du_jour(origines: list[str], nuits: int | None = None) -> pd.DataFrame:
+    """Recherches d'une date (vols_jour) : compagnie du vol le moins cher par départ, destination et date."""
+    vj = vols_jour_tableau(origines, nuits)
+    vj = vj[vj["compagnie"] != "-"][["origine", "destination", "date", "compagnie", "nom", "prix", "collecte_le",
+                                     "heure_depart", "heure_arrivee", "duree", "bagage"]]
     return (vj.sort_values("prix").drop_duplicates(["origine", "destination", "date"])
               .rename(columns={"compagnie": "code_moins_cher", "nom": "nom_moins_cher", "prix": "prix_moins_cher",
-                               "collecte_le": "collecte_moins_cher"}))
+                               "collecte_le": "collecte_moins_cher", "bagage": "bagage_moins_cher"}))
 
 
 def compagnies_collectees() -> list[str]:

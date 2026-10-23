@@ -3,3 +3,5 @@ playwright==1.63.0
 pandas==3.0.6
 airportsdata==20260905
 httpx==0.28.1
+openpyxl
+fpdf2==2.8.3
