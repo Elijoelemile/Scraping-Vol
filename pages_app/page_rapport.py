@@ -40,6 +40,8 @@ def ecrire_table(ws, tab: pd.DataFrame, titre: str, ligne: int, colonne: int, no
             if pd.isna(v):
                 continue
             c = ws.cell(row=i, column=colonne + j, value=v.item() if hasattr(v, "item") else v)
+            if str(tab.columns[j]).startswith(("Tarif", "Écart")) and isinstance(c.value, (int, float)):
+                c.number_format = '#,##0.00 "€"'  # symbole de l'euro après les tarifs
             if isinstance(c.value, datetime):  # avec l'heure seulement si elle est renseignée (ex. CollecteLe)
                 c.number_format = "dd/mm/yyyy hh:mm" if c.value.hour or c.value.minute else "dd/mm/yyyy"
     if not len(tab):
@@ -49,13 +51,26 @@ def ecrire_table(ws, tab: pd.DataFrame, titre: str, ligne: int, colonne: int, no
                   ref=f"{get_column_letter(colonne)}{entete}:{get_column_letter(colonne + len(tab.columns) - 1)}{fin}")
     table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(table)
+    if "Même bagage" in tab:  # cellule verte si TRUE, rouge si FALSE
+        from openpyxl.formatting.rule import FormulaRule
+        from openpyxl.styles import PatternFill
+        lettre = get_column_letter(colonne + list(tab.columns).index("Même bagage"))
+        zone, haut = f"{lettre}{entete + 1}:{lettre}{fin}", f"{lettre}{entete + 1}"
+        ws.conditional_formatting.add(zone, FormulaRule(formula=[f"{haut}=TRUE"], font=Font(color="000000", bold=True),
+                                                        fill=PatternFill("solid", bgColor="C8E6C9")))
+        ws.conditional_formatting.add(zone, FormulaRule(formula=[f"{haut}=FALSE"], font=Font(color="000000", bold=True),
+                                                        fill=PatternFill("solid", bgColor="FFCDD2")))
     if ECART in tab:
         lettre = get_column_letter(colonne + list(tab.columns).index(ECART))
         zone = f"{lettre}{entete + 1}:{lettre}{fin}"
-        ws.conditional_formatting.add(zone, CellIsRule(operator="lessThan", formula=["0"],
-                                                       font=Font(color="D62728", bold=True)))
+        # rouge si positif (Airfox plus cher), vert si négatif (Airfox moins cher), écriture noire
+        from openpyxl.styles import PatternFill
         ws.conditional_formatting.add(zone, CellIsRule(operator="greaterThan", formula=["0"],
-                                                       font=Font(color="2CA02C", bold=True)))
+                                                       font=Font(color="000000", bold=True),
+                                                       fill=PatternFill("solid", bgColor="FFCDD2")))
+        ws.conditional_formatting.add(zone, CellIsRule(operator="lessThan", formula=["0"],
+                                                       font=Font(color="000000", bold=True),
+                                                       fill=PatternFill("solid", bgColor="C8E6C9")))
 
 
 def bandeau(ws, texte: str, ligne: int, debut: int, fin: int, fond: str, taille: int, hauteur: int):
@@ -89,7 +104,7 @@ def en_dates(tab: pd.DataFrame, colonnes) -> pd.DataFrame:
             tab[c] = pd.to_datetime(tab[c], errors="coerce", dayfirst=bool(jj_mm.any()))
     # Bagage affiché « TRUE » / « FALSE » dans l'application : vrais booléens Excel
     for c in tab.columns:
-        if str(c).startswith("FlagBagageInclus"):
+        if str(c).startswith("FlagBagageInclus") or c == "Même bagage":
             tab[c] = tab[c].map(lambda v: {"TRUE": True, "FALSE": False}.get(v, v) if isinstance(v, str) else v)
     return tab
 

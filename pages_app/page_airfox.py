@@ -87,7 +87,8 @@ c2.metric("Colonnes", len(df.columns))
 c3.metric("Fichier", fichier.name)
 vue_airfox = filtrer(df, "airfox")
 st.caption(f"{len(vue_airfox):,} ligne(s) affichée(s)".replace(",", " "))
-st.dataframe(vue_airfox, hide_index=True, width="stretch", lazy=False)
+TARIF_EUROS = {"Tarif": st.column_config.NumberColumn(format="%.2f €")}  # symbole de l'euro après les tarifs
+st.dataframe(vue_airfox, hide_index=True, width="stretch", lazy=False, column_config=TARIF_EUROS)
 avertissement = st.empty()  # rempli plus bas, selon le type de trajet choisi pour Google Flights
 
 # --- Fichier Google Flights (données du catalogue), au même format pour la jointure ----------------------
@@ -125,30 +126,56 @@ vue = google.assign(DateAller=pd.to_datetime(google["DateAller"]).dt.strftime("%
                     CollecteLe=pd.to_datetime(google["CollecteLe"]).dt.strftime("%d/%m/%Y %H:%M"))
 vue_google = filtrer(vue, "google")
 st.caption(f"{len(vue_google):,} ligne(s) affichée(s)".replace(",", " "))
-st.dataframe(vue_google, hide_index=True, width="stretch", lazy=False)
+st.dataframe(vue_google, hide_index=True, width="stretch", lazy=False, column_config=TARIF_EUROS)
 
 # --- Jointures Airfox × Google Flights (sur les deux fichiers tels qu'affichés ci-dessus, avec leurs filtres) ----
 ECART = "Écart (Airfox − Google)"
 
 
 def couleur_ecart(v):
-    """Écart négatif (Airfox moins cher) en rouge, positif (Google moins cher) en vert."""
+    """Cellule rouge si l'écart est positif (Airfox plus cher), verte s'il est négatif (Airfox moins cher) ;
+    écriture noire."""
     if pd.isna(v) or v == 0:
         return ""
-    return f"color: {'#d62728' if v < 0 else '#2ca02c'}; font-weight: 600"
+    return f"background-color: {'#ffcdd2' if v > 0 else '#c8e6c9'}; color: #000000; font-weight: 600"
+
+
+MEME_BAGAGE = "Même bagage"
+
+
+def meme_bagage(jointure: pd.DataFrame) -> pd.Series:
+    """TRUE si Airfox et Google ont la même valeur de bagage ; vide si l'un des deux est inconnu."""
+    a = jointure["FlagBagageInclus Airfox"].astype(str).str.upper()
+    g = jointure["FlagBagageInclus Google"].astype(str).str.upper()
+    connus = a.isin(["TRUE", "FALSE"]) & g.isin(["TRUE", "FALSE"])
+    return (a == g).map({True: "TRUE", False: "FALSE"}).where(connus, "")
+
+
+def couleur_bagage(v):
+    """Même bagage : cellule verte si TRUE, rouge si FALSE."""
+    return {"TRUE": "background-color: #c8e6c9; color: #000000; font-weight: 600",
+            "FALSE": "background-color: #ffcdd2; color: #000000; font-weight: 600"}.get(v, "")
+
+
+def style_meme_compagnie(v):
+    """Toutes les cases en gris ; la coche (même compagnie) en noir."""
+    return "background-color: #e0e0e0; color: #000000; font-weight: 700; text-align: center"
 
 
 def afficher_jointure(jointure: pd.DataFrame, nb_airfox: int):
     jointure[ECART] = (pd.to_numeric(jointure["Tarif Airfox"], errors="coerce")
                        - pd.to_numeric(jointure["Tarif Google"], errors="coerce")).round(2)
+    jointure.insert(jointure.columns.get_loc("FlagBagageInclus Google") + 1, MEME_BAGAGE, meme_bagage(jointure))
     j1, j2, j3 = st.columns(3)
     j1.metric("Lignes jointes", f"{len(jointure):,}".replace(",", " "))
     j2.metric("Lignes Airfox sans équivalent Google", f"{nb_airfox - len(jointure):,}".replace(",", " "))
     j3.metric("Écart médian", f"{jointure[ECART].median():.0f} €" if len(jointure) else "—")
     tarifs = [c for c in jointure.columns if c.startswith("Tarif")] + [ECART]
     pd.set_option("styler.render.max_elements", max(262144, jointure.size + 1))
-    st.dataframe(jointure.style.map(couleur_ecart, subset=[ECART]).format("{:.2f}", subset=tarifs, na_rep="—"),
-                 hide_index=True, width="stretch", lazy=False)
+    style = jointure.style.map(couleur_ecart, subset=[ECART]).map(couleur_bagage, subset=[MEME_BAGAGE])
+    if "MêmeCompagnie" in jointure:
+        style = style.map(style_meme_compagnie, subset=["MêmeCompagnie"])
+    st.dataframe(style.format("{:.2f} €", subset=tarifs, na_rep="—"), hide_index=True, width="stretch", lazy=False)
 
 
 cles_trajet = ["VilleDepart", "VilleArrivee", "DateAller"] + (["Duree"] if aller_retour else [])
@@ -158,10 +185,10 @@ if manquantes:
     st.stop()
 airfox = vue_airfox.assign(**{c: vue_airfox[c].astype(str) for c in ("VilleDepart", "VilleArrivee", "CodeTransporteur")})
 precisions = ("Les colonnes présentes dans les deux fichiers sont suffixées « Airfox » ou « Google » (Tarif, "
-              "FlagBagageInclus…) ; « Écart » = tarif Airfox − tarif Google (vert : Google moins cher, rouge : Airfox "
+              "FlagBagageInclus…) ; « Écart » = tarif Airfox − tarif Google (rouge : Airfox plus cher, vert : Airfox "
               "moins cher). Les filtres des deux fichiers ci-dessus s'appliquent aussi à la jointure.")
 
-st.subheader("Jointure sur la même compagnie")
+st.subheader("Jointure sur la compagnie")
 cles = cles_trajet + ["CodeTransporteur"]
 st.caption(f"Une ligne quand Airfox et Google Flights ont la même valeur dans les colonnes **{', '.join(cles)}** "
            "(même départ, même ville d'arrivée, même date de départ, même compagnie"
@@ -172,6 +199,7 @@ complet = df.assign(**{c: df[c].astype(str) for c in ("VilleDepart", "VilleArriv
     vue, on=cles, how="inner", suffixes=(" Airfox", " Google"))
 complet[ECART] = (pd.to_numeric(complet["Tarif Airfox"], errors="coerce")
                   - pd.to_numeric(complet["Tarif Google"], errors="coerce")).round(2)
+complet.insert(complet.columns.get_loc("FlagBagageInclus Google") + 1, MEME_BAGAGE, meme_bagage(complet))
 st.session_state["rapport_jointure"] = complet
 
 st.subheader("Jointure sur la compagnie la moins chère")
@@ -180,8 +208,9 @@ google_tarif = vue_google.assign(_t=pd.to_numeric(vue_google["Tarif"], errors="c
 moins_cher = (google_tarif.sort_values("_t").drop_duplicates(cles_trajet).drop(columns="_t")
               .rename(columns={"CodeTransporteur": "CompagnieMoinsChere"}))
 jointure_mc = airfox.merge(moins_cher, on=cles_trajet, how="inner", suffixes=(" Airfox", " Google"))
+# Case grise pour toutes les lignes, coche noire quand c'est la même compagnie (et non une case à cocher Streamlit)
 jointure_mc.insert(jointure_mc.columns.get_loc("CompagnieMoinsChere") + 1, "MêmeCompagnie",
-                   jointure_mc["CodeTransporteur"] == jointure_mc["CompagnieMoinsChere"])
+                   (jointure_mc["CodeTransporteur"] == jointure_mc["CompagnieMoinsChere"]).map({True: "✔", False: ""}))
 st.caption(f"Une ligne quand Airfox et Google Flights ont la même valeur dans les colonnes **{', '.join(cles_trajet)}** "
            "(même départ, même ville d'arrivée, même date de départ" + (", même durée de séjour" if aller_retour else "")
            + ") : le tarif Airfox (sa compagnie, CodeTransporteur) est comparé au tarif de la **compagnie la moins chère "
