@@ -28,8 +28,13 @@ from pathlib import Path
 
 import httpx
 import pandas as pd
+import truststore
 
 from db import DB_PATH
+
+# Certificats de Windows (comme Chrome) : un antivirus ou un réseau d'entreprise qui inspecte les connexions
+# HTTPS ajoute son propre certificat à Windows ; sans cela, les connexions à Google sont refusées.
+truststore.inject_into_ssl()
 
 BASE = "https://www.google.com/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -127,6 +132,21 @@ CREATE TABLE IF NOT EXISTS compagnies_trajets (     -- bilan de la collecte par 
     bagage      INTEGER,            -- bagage cabine inclus (1/0) sur le vol le moins cher ; NULL = inconnu
     PRIMARY KEY (origine, destination, compagnie)
 );
+CREATE TABLE IF NOT EXISTS vols_annee (   -- toute l'année d'un coup (calendriers « Paris » par compagnie), sans horaires
+    origine     TEXT NOT NULL,      -- aéroport habituel de la compagnie sur ce trajet (d'après les recherches d'une date)
+    destination TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    compagnie   TEXT NOT NULL,      -- code IATA ; « ? » : prix le plus bas venant d'une compagnie non interrogée
+    nom         TEXT,
+    prix        INTEGER NOT NULL,
+    bagage      INTEGER,            -- bagage cabine de la compagnie sur ce trajet (recherches d'une date) ; NULL = inconnu
+    collecte_le TEXT NOT NULL,
+    heure_depart  TEXT,             -- toujours vides : le calendrier ne donne pas les horaires
+    heure_arrivee TEXT,
+    duree         TEXT,
+    date_retour   TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (origine, destination, date, date_retour, compagnie)
+);
 """
 
 
@@ -167,6 +187,7 @@ class GoogleFlights:
         self.delai = delai          # pause moyenne entre deux appels (secondes)
         self.appels = 0
         self.echecs_suite = 0       # appels consécutifs restés en erreur après toutes les tentatives
+        self.dernier_echec = ""     # cause du dernier appel raté (diagnostic affiché en cas de « blocage »)
         self._dernier = 0.0
         self._verrou = None         # espace les appels même quand plusieurs recherches tournent en parallèle
         self.at = None              # jeton anti-falsification exigé par Google pour un compte connecté
@@ -178,8 +199,10 @@ class GoogleFlights:
 
     async def ouvrir(self):
         r = await self.client.get("https://www.google.com/travel/flights?hl=fr&gl=FR&curr=EUR")
-        if "/sorry/" in str(r.url) or r.status_code == 429:
-            raise Bloque()
+        if "/sorry/" in str(r.url):
+            raise Bloque("page captcha de Google dès l'ouverture")
+        if r.status_code == 429:
+            raise Bloque("Google : trop de demandes (HTTP 429) dès l'ouverture")
         if self.connecte:
             m = re.search(r'"SNlM0e":"([^"]+)"', r.text)
             self.at = m.group(1) if m else None
@@ -209,11 +232,14 @@ class GoogleFlights:
                     self.client.post(BASE + nom, params={"hl": "fr", "gl": "FR", "rt": "c"},
                                      data=corps, headers=HEADERS),
                     timeout=90)
-            except (httpx.TransportError, asyncio.TimeoutError):  # connexion coupée, délai dépassé… : on réessaie
+            except (httpx.TransportError, asyncio.TimeoutError) as e:  # connexion coupée, délai dépassé… : on réessaie
+                self.dernier_echec = f"connexion impossible ({type(e).__name__} {e})".strip()
                 await asyncio.sleep(5 * (k + 1))
                 continue
-            if r.status_code == 429 or "/sorry/" in str(r.url):
-                raise Bloque()
+            if "/sorry/" in str(r.url):
+                raise Bloque("page captcha de Google")
+            if r.status_code == 429:
+                raise Bloque("Google : trop de demandes (HTTP 429)")
             if '"wrb.fr",null,"' in r.text:
                 self.echecs_suite = 0
                 ligne = next(l for l in r.text.split("\n") if l.startswith('[["wrb.fr"'))
@@ -221,6 +247,8 @@ class GoogleFlights:
             m = re.search(r'\[(\d+),null,\[\["type', r.text)
             if m and m.group(1) == "3":
                 raise PlageInvalide()
+            self.dernier_echec = (f"réponse HTTP {r.status_code} sans données"
+                                  + (f" (code Google {m.group(1)})" if m else f" : {r.text[:80]!r}"))
         self.echecs_suite += 1
         return None
 
@@ -268,6 +296,24 @@ class GoogleFlights:
         if not data or not data[1]:
             return {}
         return {j[0]: (j[1], j[2][0][1]) for j in data[1] if j[1] and j[2] and j[2][0] and j[2][0][1]}
+
+    async def calendrier_paris(self, d: str, debut: date, fin: date, nuits: int | None = None,
+                               compagnies: list[str] | None = None) -> dict[str, int]:
+        """{date aller: prix} au départ de « Paris » (tous ses aéroports, comme sur Google Flights), pour les jours
+        entre debut et fin (une plage ≤ TRANCHE_JOURS) ; nuits : aller-retour ; compagnies : ces compagnies seulement."""
+        def segment(a, b, jour):
+            lieu = lambda x: [[[PARIS_MID, 4]]] if x == "PAR" else [[[x, 0]]]
+            return [lieu(a), lieu(b), None, 0, compagnies, None, jour, None, None, None, None, None, None, None, 3]
+        segments = [segment("PAR", d, debut.isoformat())]
+        if nuits:
+            segments.append(segment(d, "PAR", (debut + timedelta(days=nuits)).isoformat()))
+        filtre = [None, None, 1 if nuits else 2, None, [], 1, [1, 0, 0, 0], None, None, None, None, None, None,
+                  segments, None, None, None, 1]
+        data = await self.rpc("GetCalendarPicker", [None, filtre, [debut.isoformat(), fin.isoformat()]]
+                              + ([None, [nuits, nuits]] if nuits else []))
+        if not data or not data[1]:
+            return {}
+        return {j[0]: j[2][0][1] for j in data[1] if j[2] and j[2][0] and j[2][0][1]}
 
     async def vols(self, t, ville: bool = False, lieux: dict | None = None) -> list[dict]:
         """Liste des vols d'un trajet à une date (GetShoppingResults), au format de google_flights_scraper.
@@ -628,8 +674,8 @@ async def rechercher_jour(gf: GoogleFlights, d: str, jour: str, origines: list[s
         try:
             vols = await gf.vols(Trajet(o, d, jour, retour), lieux={"PAR": (PARIS_MID, 4)} if o == "PAR" else None)
         except ErreurGoogle:
-            if gf.echecs_suite >= 3:
-                raise Bloque()  # erreurs à la suite : blocage silencieux de Google
+            if gf.echecs_suite >= 3:  # erreurs à la suite : blocage silencieux de Google (ou réseau)
+                raise Bloque(f"{gf.echecs_suite} recherches de suite sans réponse — dernière cause : {gf.dernier_echec}")
             raise
         for v in vols:
             # aéroports parfois donnés par leur nom (« Aéroport de Paris-Orly ») : on retrouve le code
@@ -663,13 +709,21 @@ def _arrivee(v: dict) -> str:
     return f"{v.get('heure_arrivee') or ''} (+{n})" if n > 0 else (v.get("heure_arrivee") or "")
 
 
+ESSAIS_PAR_DATE = 3       # recherche en erreur : jusqu'à 3 essais (pauses de 5 puis 15 s) avant de passer à la suite
+CONFIRMER_AUCUN_VOL = True  # « aucun vol » : une 2e recherche le confirme (un blocage discret ressemble à « aucun vol »)
+
+
 async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], delai: float = 1.2,
-                            on_progress=None, nuits: int | None = None, parallele: int = 4) -> int:
+                            on_progress=None, nuits: int | None = None, parallele: int = 4,
+                            echecs: list | None = None) -> int:
     """Recherches en direct pour des (destination, date) choisies dans l'application, `parallele` à la fois ;
-    nuits : aller-retour (retour nuits jours après l'aller). Renvoie le nb avec vols. Lève Bloque si Google bloque."""
+    nuits : aller-retour (retour nuits jours après l'aller). Une recherche en erreur est refaite (ESSAIS_PAR_DATE),
+    un « aucun vol » est confirmé par une 2e recherche ; echecs : reçoit les (destination, date) restées en erreur.
+    Renvoie le nb avec vols. Lève Bloque si Google bloque."""
     gf = GoogleFlights(delai)
     places = asyncio.Semaphore(parallele)
     bloque = asyncio.Event()
+    raison = []  # cause du blocage, pour le message
     faites, trouvees = 0, 0
 
     async def une(d, jour):
@@ -678,13 +732,26 @@ async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], 
             if bloque.is_set():
                 return
             retour = (date.fromisoformat(jour) + timedelta(days=nuits)).isoformat() if nuits else None
-            try:
-                avec_vols = await rechercher_jour(gf, d, jour, origines, retour)
-            except Bloque:
-                bloque.set()  # inutile de continuer : les recherches suivantes seraient bloquées aussi
-                return
-            except ErreurGoogle:
-                avec_vols = False  # rien n'est enregistré pour cette date : elle garde ses anciennes valeurs
+            avec_vols, aucun_vol_vu = False, False
+            for essai in range(ESSAIS_PAR_DATE):
+                if essai:
+                    await asyncio.sleep(5 if essai == 1 else 15)
+                try:
+                    avec_vols = await rechercher_jour(gf, d, jour, origines, retour)
+                except Bloque as e:
+                    raison.append(str(e))
+                    bloque.set()  # inutile de continuer : les recherches suivantes seraient bloquées aussi
+                    return
+                except PlageInvalide:
+                    break  # recherche refusée par Google (date hors calendrier…) : inutile de redemander
+                except (ErreurGoogle, httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+                    continue  # rien n'est enregistré pour cette date : on redemande
+                if avec_vols or aucun_vol_vu or not CONFIRMER_AUCUN_VOL:
+                    break
+                aucun_vol_vu = True  # « aucun vol » : on redemande une fois pour en être sûr
+            else:
+                if not aucun_vol_vu and echecs is not None:
+                    echecs.append((d, jour))  # toujours en erreur : rien d'enregistré, encore « à compléter »
             trouvees += avec_vols
             faites += 1
             if on_progress:
@@ -696,8 +763,274 @@ async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], 
     finally:
         await gf.fermer()
     if bloque.is_set():
+        raise Bloque(raison[0] if raison else "")
+    return trouvees
+
+
+# --- Toute l'année d'un coup : calendriers « Paris » (toutes compagnies, puis par compagnie) -------------
+COMPAGNIES_PAR_DESTINATION = 4  # compagnies interrogées par destination (les moins chères des recherches d'une date)
+
+
+def candidats_annee(d: str, k: int = COMPAGNIES_PAR_DESTINATION) -> list[dict]:
+    """Compagnies à interroger pour d : les mieux classées (rang de prix) dans les recherches d'une date déjà faites
+    depuis Paris, avec leur aéroport habituel, leur nom et leur bagage cabine."""
+    with closing(connexion()) as con:
+        vj = pd.read_sql_query(
+            f"SELECT origine, date, date_retour, compagnie, nom, prix, bagage, collecte_le FROM vols_jour"
+            f" WHERE destination = ? AND origine IN ({','.join('?' * len(PARIS_AEROPORTS))})",
+            con, params=[d, *PARIS_AEROPORTS])
+    if vj.empty:
+        return []
+    vj["rang"] = vj.groupby(["date", "date_retour"])["prix"].rank(method="min")
+    infos = []
+    for c, g in vj.groupby("compagnie"):
+        g = g.sort_values("collecte_le", ascending=False)
+        bagages = g["bagage"].dropna()
+        infos.append({"compagnie": c, "rang": g["rang"].min(), "moyenne": g["rang"].mean(),
+                      "origine": g["origine"].mode().iloc[0], "nom": g["nom"].iloc[0],
+                      "bagage": None if bagages.empty else int(bagages.mode().iloc[0])})
+    infos.sort(key=lambda x: (x["rang"], x["moyenne"]))
+    return infos[:k]
+
+
+async def collecter_annee(gf: GoogleFlights, d: str, nuits: int | None, fin: date) -> int:
+    """Toute l'année vers d depuis Paris : prix le plus bas de chaque date (toutes compagnies), puis prix de chaque
+    compagnie candidate ; enregistre dans vols_annee. Renvoie le nb de dates avec prix."""
+    async def annee(compagnies=None):
+        prix = {}
+        for a, b in tranches(date.today(), fin):
+            try:
+                prix |= await gf.calendrier_paris(d, a, b, nuits, compagnies)
+            except PlageInvalide:  # au-delà de l'horizon de Google pour ce trajet
+                pass
+        return prix
+
+    tous = await annee()
+    if not tous:
+        if gf.echecs_suite >= 3:
+            raise Bloque()  # erreurs à la suite : blocage silencieux de Google
+        return 0  # aucun prix (ou réponse en erreur) : on garde les anciennes valeurs
+    candidats = candidats_annee(d)
+    par_cie = {c["compagnie"]: await annee(c["compagnie"].split("/")) for c in candidats}
+    origine_defaut = candidats[0]["origine"] if candidats else "CDG"
+    maintenant = datetime.now().isoformat(timespec="seconds")
+    lignes = []
+    for jour, plus_bas in tous.items():
+        retour = (date.fromisoformat(jour) + timedelta(days=nuits)).isoformat() if nuits else ""
+        trouve = False
+        for c in candidats:
+            p = par_cie[c["compagnie"]].get(jour)
+            if p:
+                lignes.append((c["origine"], d, jour, c["compagnie"], c["nom"], p, c["bagage"], maintenant,
+                               None, None, None, retour))
+                trouve |= p <= plus_bas
+        if not trouve:  # le prix le plus bas vient d'une compagnie qui n'a pas été interrogée
+            lignes.append((origine_defaut, d, jour, "?", None, plus_bas, None, maintenant, None, None, None, retour))
+    with closing(connexion()) as con, con:
+        if nuits:
+            con.execute("DELETE FROM vols_annee WHERE destination = ? AND date_retour != ''"
+                        " AND julianday(date_retour) - julianday(date) = ?", (d, nuits))
+        else:
+            con.execute("DELETE FROM vols_annee WHERE destination = ? AND date_retour = ''", (d,))
+        con.executemany("INSERT OR REPLACE INTO vols_annee VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", lignes)
+    return len(tous)
+
+
+def duree_annee(n_destinations: int) -> int:
+    """Minutes estimées pour actualiser_annee (≈ 1,2 s par appel, 2 tranches × (1 + compagnies) par destination)."""
+    return max(1, round(n_destinations * 2 * (1 + COMPAGNIES_PAR_DESTINATION) * 1.2 / 60))
+
+
+async def actualiser_annee(destinations: list[str], nuits: int | None = None, delai: float = 1.2,
+                           on_progress=None, parallele: int = 4) -> int:
+    """Toute l'année d'un coup pour ces destinations depuis Paris (aller simple ou aller-retour de `nuits` nuits).
+    Chaque destination est enregistrée dès qu'elle est finie. Renvoie le nb de destinations avec prix.
+    Lève Bloque si Google bloque."""
+    gf = GoogleFlights(delai)
+    places = asyncio.Semaphore(parallele)
+    bloque = asyncio.Event()
+    with closing(connexion()) as con:
+        derniere = con.execute("SELECT MAX(date) FROM calendrier").fetchone()[0]
+    horizon_google = date.today() + timedelta(days=327)  # au-delà, Google refuse la plage
+    fin = min(date.fromisoformat(derniere), horizon_google) if derniere else horizon_google
+    faites, trouvees = 0, 0
+
+    async def une(d):
+        nonlocal faites, trouvees
+        async with places:
+            if bloque.is_set():
+                return
+            try:
+                n = await collecter_annee(gf, d, nuits, fin)
+            except Bloque:
+                bloque.set()
+                return
+            trouvees += n > 0
+            faites += 1
+            if on_progress:
+                on_progress(faites, len(destinations), f"{d} : {n} dates")
+
+    try:
+        await gf.ouvrir()
+        await asyncio.gather(*(une(d) for d in destinations))
+    finally:
+        await gf.fermer()
+    if bloque.is_set():
         raise Bloque()
     return trouvees
+
+
+# --- Actualisation en arrière-plan (jour, semaine, mois, année) -------------------------------------------
+# Les recherches tournent dans un processus à part : on peut quitter la page, fermer le navigateur ou relancer
+# l'application. Avancement dans actualisation.json ; fichier actualisation.arret = demande d'arrêt.
+FICHIER_ACTUALISATION = Path(__file__).with_name("actualisation.json")
+FICHIER_ARRET = Path(__file__).with_name("actualisation.arret")
+FICHIER_PAIRES = Path(__file__).with_name("actualisation_paires.json")  # les (destination, date) à rechercher
+SECONDES_PAR_RECHERCHE = 3.2  # mesuré (4 recherches en parallèle, 193 destinations en 10 min 20 s)
+PAUSE_BLOCAGE_MIN = 30        # attente après un blocage de Google, puis reprise automatique
+MAX_BLOCAGES = 12             # blocages tolérés d'affilée avant l'arrêt
+LOT_FOND = 40                 # recherches par lot (≈ 2 min) : l'arrêt est pris en compte entre deux lots
+
+
+def _ecrire_actualisation(**champs):
+    etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8")) if FICHIER_ACTUALISATION.exists() else {}
+    etat_fond |= champs | {"maj": datetime.now().isoformat(timespec="seconds")}
+    temporaire = FICHIER_ACTUALISATION.with_suffix(".tmp")
+    temporaire.write_text(json.dumps(etat_fond, ensure_ascii=False), encoding="utf-8")
+    temporaire.replace(FICHIER_ACTUALISATION)
+
+
+def etat_actualisation() -> dict | None:
+    """Avancement de l'actualisation en arrière-plan, ou None.
+    Un processus qui ne donne plus de nouvelles depuis 15 min (veille, arrêt de l'ordinateur) est « interrompue »."""
+    try:
+        etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    attendu = datetime.fromisoformat(etat_fond.get("reprise_a") or etat_fond["maj"])
+    if etat_fond.get("statut") in ("en cours", "pause") and datetime.now() - max(
+            attendu, datetime.fromisoformat(etat_fond["maj"])) > timedelta(minutes=15):
+        etat_fond["statut"] = "interrompue"
+    return etat_fond
+
+
+def actualisation_active() -> bool:
+    e = etat_actualisation()
+    return bool(e) and e.get("statut") in ("en cours", "pause")
+
+
+def lancer_actualisation(paires: list[tuple[str, str]], origines: list[str], nuits: int | None, libelle: str):
+    """Démarre les recherches de ces (destination, date) dans un processus à part."""
+    import subprocess
+    FICHIER_ARRET.unlink(missing_ok=True)
+    FICHIER_ACTUALISATION.unlink(missing_ok=True)
+    FICHIER_PAIRES.write_text(json.dumps([list(x) for x in paires]), encoding="utf-8")
+    jours = sorted(j for _, j in paires)
+    _ecrire_actualisation(origines=origines, nuits=nuits, libelle=libelle,
+                          periode=[jours[0], jours[-1]] if jours else None,
+                          total=len(paires), faites=0, trouvees=0, statut="en cours", message="démarrage…",
+                          debut=datetime.now().isoformat(timespec="seconds"), reprise_a=None, blocages=0)
+    journal = open(Path(__file__).with_name("actualisation.log"), "a", encoding="utf-8")
+    drapeaux = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if sys.platform == "win32" else 0
+    subprocess.Popen([sys.executable, str(Path(__file__)), "actualiser-fond"], cwd=Path(__file__).parent,
+                     stdout=journal, stderr=journal, creationflags=drapeaux, start_new_session=sys.platform != "win32")
+
+
+def arreter_actualisation():
+    FICHIER_ARRET.touch()
+
+
+# Historique : à la fin de chaque actualisation, son bilan (période, heure, durée) est copié dans
+# historique_actualisations/
+DOSSIER_HISTORIQUE_ACTUALISATIONS = Path(__file__).with_name("historique_actualisations")
+
+
+def archiver_actualisation():
+    """Copie le bilan de l'actualisation qui vient de finir (période, début, fin, durée) dans l'historique."""
+    try:
+        etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    if not etat_fond.get("debut"):
+        return
+    etat_fond.setdefault("fin", etat_fond.get("maj"))
+    ident = datetime.fromisoformat(etat_fond["debut"]).strftime("%Y-%m-%d_%H%M%S")
+    DOSSIER_HISTORIQUE_ACTUALISATIONS.mkdir(exist_ok=True)
+    (DOSSIER_HISTORIQUE_ACTUALISATIONS / f"{ident}.json").write_text(
+        json.dumps(etat_fond | {"id": ident}, ensure_ascii=False), encoding="utf-8")
+
+
+def historique_actualisations() -> list[dict]:
+    """Bilans des actualisations passées, de la plus récente à la plus ancienne."""
+    if not DOSSIER_HISTORIQUE_ACTUALISATIONS.exists():
+        return []
+    bilans = []
+    for f in DOSSIER_HISTORIQUE_ACTUALISATIONS.glob("*.json"):
+        try:
+            bilans.append(json.loads(f.read_text(encoding="utf-8")))
+        except json.JSONDecodeError:
+            continue
+    return sorted(bilans, key=lambda b: b["id"], reverse=True)
+
+
+async def actualisation_fond():
+    """Corps du processus lancé par lancer_actualisation : lots de LOT_FOND recherches ; après un blocage de Google,
+    pause de PAUSE_BLOCAGE_MIN minutes puis reprise du lot. Chaque recherche est enregistrée dès qu'elle est faite."""
+    etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+    paires = [tuple(x) for x in json.loads(FICHIER_PAIRES.read_text(encoding="utf-8"))]
+    origines, nuits = etat_fond["origines"], etat_fond["nuits"]
+    i, trouvees, blocages = etat_fond.get("faites", 0), etat_fond.get("trouvees", 0), 0
+    echecs = [tuple(x) for x in etat_fond.get("echecs", [])]
+    incompletes = []  # encore en erreur après la dernière passe
+    pause_s = etat_fond.get("pause_s", 0)  # temps passé en pause après un blocage de Google
+    derniere_passe = False
+    while i < len(paires) or (echecs and not derniere_passe):
+        if i >= len(paires):
+            # Dernière passe : les dates restées en erreur sont redemandées une fois, plus tard (Google répond mieux)
+            derniere_passe = True
+            paires, echecs, i = paires + echecs, [], len(paires)
+            _ecrire_actualisation(total=len(paires), message="dernière passe sur les dates incomplètes")
+        if FICHIER_ARRET.exists():
+            _ecrire_actualisation(statut="arrêtée", faites=i, message="arrêtée à votre demande",
+                                  fin=datetime.now().isoformat(timespec="seconds"))
+            return
+        lot = paires[i:i + LOT_FOND]
+        try:
+            echecs_lot = []
+            trouvees += await actualiser_direct(
+                lot, origines, nuits=nuits, echecs=echecs_lot,
+                on_progress=lambda k, total, msg: _ecrire_actualisation(faites=i + k, message=msg))
+            i += len(lot)
+            blocages = 0
+            if derniere_passe:
+                incompletes.extend(echecs_lot)
+            else:
+                echecs.extend(echecs_lot)
+            _ecrire_actualisation(faites=i, trouvees=trouvees, statut="en cours", reprise_a=None,
+                                  echecs=[list(x) for x in echecs], incompletes=len(echecs) + len(incompletes))
+        except Bloque as e:
+            print(f"{datetime.now():%d/%m %H:%M:%S} blocage : {e}", flush=True)  # journal actualisation.log
+            blocages += 1
+            if blocages > MAX_BLOCAGES:
+                _ecrire_actualisation(statut="bloquée", faites=i, message="Google bloque toujours : relancez plus tard",
+                                  fin=datetime.now().isoformat(timespec="seconds"))
+                return
+            reprise = datetime.now() + timedelta(minutes=PAUSE_BLOCAGE_MIN)
+            _ecrire_actualisation(statut="pause", faites=i, blocages=blocages,
+                                  reprise_a=reprise.isoformat(timespec="seconds"),
+                                  message=f"Google bloque ({e or 'captcha'}) : reprise à {reprise:%H:%M}")
+            debut_pause = datetime.now()
+            while datetime.now() < reprise:
+                if FICHIER_ARRET.exists():
+                    break
+                await asyncio.sleep(20)
+                _ecrire_actualisation()  # signe de vie pendant la pause
+            pause_s += (datetime.now() - debut_pause).total_seconds()
+            _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…", pause_s=round(pause_s))
+    _ecrire_actualisation(statut="terminée", faites=i, trouvees=trouvees, incompletes=len(incompletes),
+                          message="terminée" + (f" ; {len(incompletes)} date(s) restée(s) sans réponse de Google"
+                                                if incompletes else " ; toutes les dates ont une réponse"),
+                          fin=datetime.now().isoformat(timespec="seconds"))
 
 
 async def collecter_jour(jour: str, destinations: list[str], delai: float, pause_blocage_min: float = 60,
@@ -1148,7 +1481,8 @@ VILLES_AIRFOX = {"PAR": PARIS_AEROPORTS, "LON": ["LHR", "LGW", "STN", "LTN", "LC
                  "IZM": ["ADB"], "DKR": ["DSS"]}
 
 
-def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None) -> pd.DataFrame:
+def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
+                          seulement_actualise: bool = False) -> pd.DataFrame:
     """Données Google Flights du catalogue au format du fichier Airfox, pour la jointure :
     VilleDepart (PAR), VilleArrivee (code Airfox), DateAller, CodeTransporteur, Tarif, FlagBagageInclus.
     Une ligne par date et compagnie : le tarif le plus bas parmi les aéroports de Paris (aller simple, 1 adulte).
@@ -1171,12 +1505,21 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None) -
             f"SELECT origine, destination, date, date_retour, compagnie, prix, bagage, collecte_le FROM vols_jour"
             f" WHERE origine IN ({paris}) AND destination IN ({marques}) AND date >= ?",
             con, params=[*PARIS_AEROPORTS, *aeroports, date.today().isoformat()])
+        annee = pd.read_sql_query(
+            f"SELECT origine, destination, date, date_retour, compagnie, prix, bagage, collecte_le FROM vols_annee"
+            f" WHERE destination IN ({marques}) AND date >= ?", con, params=[*aeroports, date.today().isoformat()])
     jour = jour[jour["date_retour"] == _retours(jour["date"], nuits)].drop(columns="date_retour")
-    if nuits:  # pas de calendrier aller-retour par compagnie : seulement les recherches d'une date
+    # « toute l'année » : seulement les dates sans recherche d'une date (celle-ci, avec horaires, prime)
+    annee = annee[annee["date_retour"] == _retours(annee["date"], nuits)].drop(columns="date_retour")
+    cherchees = set(zip(jour["destination"], jour["date"]))
+    annee = annee[[(d, j) not in cherchees for d, j in zip(annee["destination"], annee["date"])]]
+    annee = annee[annee["compagnie"] != "?"].assign(Source="calendrier de l'année")
+    # pas de calendrier aller-retour par compagnie ; seulement_actualise : uniquement les recherches du Catalogue
+    if nuits or seulement_actualise:
         cal = cal.iloc[0:0]
     cal["Source"] = "calendrier de la compagnie"
     jour["Source"] = "recherche du jour"
-    df = pd.concat([cal, jour], ignore_index=True)
+    df = pd.concat([cal, jour, annee], ignore_index=True)
     df = df[df["compagnie"] != "-"]  # « - » : recherche faite, aucun vol
     if df.empty:
         return df
@@ -1211,18 +1554,28 @@ def calendrier_ar_origines(origines: list[str], nuits: int) -> pd.DataFrame:
             f" WHERE duree = ? AND origine IN ({','.join('?' * len(origines))})", con, params=[nuits, *origines])
 
 
-def vols_jour_tableau(origines: list[str], nuits: int | None = None) -> pd.DataFrame:
-    """Recherches d'une date (vols_jour) en aller simple, ou en aller-retour de `nuits` nuits."""
+def vols_jour_tableau(origines: list[str], nuits: int | None = None, annee: bool = False) -> pd.DataFrame:
+    """Recherches d'une date (vols_jour) en aller simple, ou en aller-retour de `nuits` nuits.
+    annee : complétées par « toute l'année » (vols_annee) pour les dates qui n'ont pas eu de recherche d'une date."""
+    marques = ",".join("?" * len(origines))
     with closing(connexion()) as con:
-        vj = pd.read_sql_query(
-            f"SELECT * FROM vols_jour WHERE origine IN ({','.join('?' * len(origines))}) OR origine = '-'",
-            con, params=origines)  # « - » : recherche faite sans aucun vol
-    return vj[vj["date_retour"] == _retours(vj["date"], nuits)]
+        vj = pd.read_sql_query(f"SELECT * FROM vols_jour WHERE origine IN ({marques}) OR origine = '-'",
+                               con, params=origines)  # « - » : recherche faite sans aucun vol
+        va = pd.read_sql_query(f"SELECT * FROM vols_annee WHERE origine IN ({marques}) AND date >= ?",
+                               con, params=[*origines, date.today().isoformat()]) if annee else None
+    vj = vj[vj["date_retour"] == _retours(vj["date"], nuits)]
+    if annee and not va.empty:
+        va = va[va["date_retour"] == _retours(va["date"], nuits)]
+        cherchees = set(zip(vj["destination"], vj["date"]))  # la recherche d'une date (avec horaires) prime
+        va = va[[(d, j) not in cherchees for d, j in zip(va["destination"], va["date"])]]
+        vj = pd.concat([vj, va], ignore_index=True)
+    return vj
 
 
 def moins_cher_du_jour(origines: list[str], nuits: int | None = None) -> pd.DataFrame:
-    """Recherches d'une date (vols_jour) : compagnie du vol le moins cher par départ, destination et date."""
-    vj = vols_jour_tableau(origines, nuits)
+    """Recherches d'une date (vols_jour, puis toute l'année) : compagnie du vol le moins cher par départ,
+    destination et date."""
+    vj = vols_jour_tableau(origines, nuits, annee=True)
     vj = vj[vj["compagnie"] != "-"][["origine", "destination", "date", "compagnie", "nom", "prix", "collecte_le",
                                      "heure_depart", "heure_arrivee", "duree", "bagage"]]
     return (vj.sort_values("prix").drop_duplicates(["origine", "destination", "date"])
@@ -1347,7 +1700,18 @@ def main():
     p.add_argument("destinations", help="Codes IATA séparés par des virgules, ou fichier liste (ex. listes/airfox.txt)")
     p.add_argument("--delai", type=float, default=6.0)
     sub.add_parser("etat", help="Afficher l'état du catalogue")
+    sub.add_parser("actualiser-fond", help="(lancé par l'application) recherches d'actualisation.json en arrière-plan")
     a = ap.parse_args()
+    if a.cmd == "actualiser-fond":
+        try:
+            asyncio.run(actualisation_fond())
+        except Exception as e:  # le statut dit pourquoi tout s'est arrêté
+            _ecrire_actualisation(statut="erreur", message=f"{type(e).__name__} : {e}",
+                                  fin=datetime.now().isoformat(timespec="seconds"))
+            raise
+        finally:
+            archiver_actualisation()
+        return
 
     try:
         if a.cmd == "decouvrir":

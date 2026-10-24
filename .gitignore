@@ -10,3 +10,23 @@ __pycache__/
 *.log
 # vols.db (prix collectés) est versionné : la version en ligne (Streamlit Cloud) n'a pas d'autre source de données
 
+# Routines et réglages d'alerte (adresse e-mail personnelle) : propres à ce PC
+routines.json
+alerte_routine.json
+
+# Donnée Airfox chargée dans l'application (propre à ce PC)
+donnee_chargee/
+
+# Actualisation en arrière-plan (avancement en cours) et historique des actualisations (propres à ce PC)
+actualisation.json
+actualisation.tmp
+actualisation_paires.json
+actualisation.arret
+actualisation.log
+historique_actualisations/
+
+# Couleurs des graphiques choisies dans Data Visualisation (préférence de ce PC)
+couleurs_graphiques.json
+
+# Version portable (python + bibliothèques + application, ~140 Mo) : se refait avec construire_portable.py
+dist/

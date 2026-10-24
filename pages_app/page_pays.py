@@ -8,6 +8,7 @@ import streamlit as st
 import catalogue
 import recap
 from google_flights_scraper import tableau_comparateur, vers_dataframe
+from titres import titre_page
 
 LIBELLES_CLASSES = {"eco": "Économique", "premium": "Premium éco", "affaires": "Affaires", "premiere": "Première"}
 ESCALES = {"Toutes": None, "Direct": 0, "≤ 1 escale": 1, "≤ 2 escales": 2}
@@ -18,7 +19,7 @@ def avec_prix(df, colonne, vide):
     return df.style.format(lambda v: f"{v:.0f} €", subset=[colonne], na_rep=vide)
 
 
-st.title("Vols de pays à pays")
+titre_page("Vols de pays à pays", "pays")
 st.caption("Tapez un pays de départ et un pays d'arrivée : tous les vols entre les deux, tous aéroports confondus "
            "(jusqu'à environ 300 vols, les plus pertinents selon Google), en une seule recherche.")
 

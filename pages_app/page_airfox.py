@@ -1,16 +1,17 @@
-"""Page « Comparatif Airfox vs Google Flights » : chargement et affichage du fichier Airfox (étape 1)."""
+"""Page « Comparatif Airfox vs Google Flights » : donnée Airfox (page « Charger la donnée »), fichier Google
+Flights (recherches actualisées du Catalogue) et leurs jointures."""
 import pandas as pd
 import streamlit as st
 
 import catalogue
+import donnees
+from titres import titre_page
 
-st.title("Comparatif Airfox vs Google Flights")
-st.caption("Chargez le fichier Airfox (CSV ou Excel) pour l'afficher.")
-
-fichier = st.file_uploader("Fichier Airfox", type=["csv", "xlsx", "xls"],
-                           help="Ex. AirfoxCache.csv ou AirfoxCache.csv.xlsx")
-if fichier is None and "donnee_airfox" not in st.session_state:
-    st.info("Aucun fichier chargé (ici ou dans la page « Charger la donnée »).")
+titre_page("Comparatif Airfox vs Google Flights", "comparatif")
+# La donnée Airfox vient de la page « Charger la donnée » ; sans elle, la page reste vide
+gardee = donnees.donnee_gardee()
+if gardee is None:
+    st.info("Aucune donnée chargée : chargez le fichier Airfox dans la page « Charger la donnée ».")
     st.stop()
 
 
@@ -44,35 +45,17 @@ def filtrer(tab: pd.DataFrame, cle: str) -> pd.DataFrame:
     return tab
 
 
-@st.cache_data(show_spinner="Lecture du fichier…")
-def lire(contenu: bytes, nom: str) -> pd.DataFrame:
-    import io
-    if nom.lower().endswith((".xlsx", ".xls")):
-        return pd.read_excel(io.BytesIO(contenu))
-    # CSV : séparateur (« ; » ou « , ») et encodage détectés
-    for encodage in ("utf-8-sig", "latin-1"):
-        try:
-            return pd.read_csv(io.BytesIO(contenu), sep=None, engine="python", encoding=encodage)
-        except UnicodeDecodeError:
-            continue
-    raise ValueError("encodage du fichier non reconnu")
 
 
-try:
-    if fichier is None:  # donnée chargée dans la page « Charger la donnée »
-        df = st.session_state["donnee_airfox"].copy()
-        fichier = type("Fichier", (), {"name": st.session_state.get("donnee_fichier", "donnée chargée")})()
-    else:
-        df = lire(fichier.getvalue(), fichier.name)
-except Exception as e:
-    st.error(f"Impossible de lire le fichier ({type(e).__name__} : {e}).")
-    st.stop()
+df, nom_fichier, _ = gardee
+df = df.copy()
 
 # Tables complètes gardées pour la page « Rapport Excel »
 st.session_state["rapport_airfox"] = df.copy()
-st.session_state["rapport_fichier"] = fichier.name
+st.session_state["rapport_fichier"] = nom_fichier
 st.session_state["rapport_google"] = None
 st.session_state["rapport_jointure"] = None
+st.session_state["rapport_jointure_moins_chere"] = None
 
 # Affichage comme dans Excel : dates « 22/10/2026 », vrai/faux en « TRUE » / « FALSE » (et non en cases à cocher)
 for col in df.columns:
@@ -84,7 +67,7 @@ for col in df.columns:
 c1, c2, c3 = st.columns(3)
 c1.metric("Lignes", f"{len(df):,}".replace(",", " "))
 c2.metric("Colonnes", len(df.columns))
-c3.metric("Fichier", fichier.name)
+c3.metric("Fichier", nom_fichier)
 vue_airfox = filtrer(df, "airfox")
 st.caption(f"{len(vue_airfox):,} ligne(s) affichée(s)".replace(",", " "))
 TARIF_EUROS = {"Tarif": st.column_config.NumberColumn(format="%.2f €")}  # symbole de l'euro après les tarifs
@@ -96,8 +79,10 @@ st.header("Fichier Google Flights")
 # Durée du séjour des tarifs Airfox (colonne « Duree », en nuits) : les tarifs Google doivent être comparables
 nuits_airfox = (int(pd.to_numeric(df["Duree"], errors="coerce").mode().iloc[0])
                 if "Duree" in df.columns and pd.to_numeric(df["Duree"], errors="coerce").notna().any() else None)
-# Type de trajet : celui choisi dans la page Catalogue (tableau « Toutes les dates ») ; None = aller simple
-nuits = st.session_state.get("nuits_catalogue")
+# Type de trajet : celui choisi dans la page Catalogue (tableau « Toutes les dates ») ; None = aller simple.
+# Catalogue pas encore ouvert dans cette session : celui de la donnée Airfox (ex. aller-retour de 7 nuits)
+nuits = st.session_state.get("nuits_catalogue", nuits_airfox) or None  # 0 = aller simple choisi au Catalogue
+st.session_state["nuits_comparatif"] = nuits  # repris par Data Visualisation (type de trajet des jointures)
 aller_retour = nuits is not None
 if nuits_airfox and nuits != nuits_airfox:
     avertissement.warning(f"⚠️ Les tarifs Airfox sont des allers-retours de **{nuits_airfox} nuits** (colonne Duree). "
@@ -106,8 +91,9 @@ if nuits_airfox and nuits != nuits_airfox:
 if "VilleArrivee" not in df.columns:
     st.warning("Colonne « VilleArrivee » introuvable dans le fichier Airfox : impossible de choisir les destinations.")
     st.stop()
+# Fichier Google Flights : les recherches actualisées dans le Catalogue (boutons « Compléter » / « Actualiser »)
 google = catalogue.tableau_google_airfox(sorted(df["VilleArrivee"].dropna().astype(str).unique()),
-                                        int(nuits) if aller_retour else None)
+                                        int(nuits) if aller_retour else None, seulement_actualise=True)
 st.session_state["rapport_google"] = google.copy()
 if google.empty:
     st.info(f"Aucun tarif Google Flights aller-retour de {nuits} nuits pour les destinations de ce fichier. "
@@ -203,14 +189,19 @@ complet.insert(complet.columns.get_loc("FlagBagageInclus Google") + 1, MEME_BAGA
 st.session_state["rapport_jointure"] = complet
 
 st.subheader("Jointure sur la compagnie la moins chère")
-# Côté Google : pour chaque trajet et date, la compagnie au tarif le plus bas, quelle qu'elle soit
-google_tarif = vue_google.assign(_t=pd.to_numeric(vue_google["Tarif"], errors="coerce")).dropna(subset=["_t"])
-moins_cher = (google_tarif.sort_values("_t").drop_duplicates(cles_trajet).drop(columns="_t")
-              .rename(columns={"CodeTransporteur": "CompagnieMoinsChere"}))
-jointure_mc = airfox.merge(moins_cher, on=cles_trajet, how="inner", suffixes=(" Airfox", " Google"))
-# Case grise pour toutes les lignes, coche noire quand c'est la même compagnie (et non une case à cocher Streamlit)
-jointure_mc.insert(jointure_mc.columns.get_loc("CompagnieMoinsChere") + 1, "MêmeCompagnie",
-                   (jointure_mc["CodeTransporteur"] == jointure_mc["CompagnieMoinsChere"]).map({True: "✔", False: ""}))
+def jointure_moins_chere(fichier_airfox: pd.DataFrame, fichier_google: pd.DataFrame) -> pd.DataFrame:
+    """Chaque ligne Airfox face à la compagnie la moins chère chez Google le même jour, quelle qu'elle soit."""
+    tarifs = fichier_google.assign(_t=pd.to_numeric(fichier_google["Tarif"], errors="coerce")).dropna(subset=["_t"])
+    moins_cher = (tarifs.sort_values("_t").drop_duplicates(cles_trajet).drop(columns="_t")
+                  .rename(columns={"CodeTransporteur": "CompagnieMoinsChere"}))
+    j = fichier_airfox.merge(moins_cher, on=cles_trajet, how="inner", suffixes=(" Airfox", " Google"))
+    # Case grise pour toutes les lignes, coche noire quand c'est la même compagnie (et non une case à cocher Streamlit)
+    j.insert(j.columns.get_loc("CompagnieMoinsChere") + 1, "MêmeCompagnie",
+             (j["CodeTransporteur"] == j["CompagnieMoinsChere"]).map({True: "✔", False: ""}))
+    return j
+
+
+jointure_mc = jointure_moins_chere(airfox, vue_google)
 st.caption(f"Une ligne quand Airfox et Google Flights ont la même valeur dans les colonnes **{', '.join(cles_trajet)}** "
            "(même départ, même ville d'arrivée, même date de départ" + (", même durée de séjour" if aller_retour else "")
            + ") : le tarif Airfox (sa compagnie, CodeTransporteur) est comparé au tarif de la **compagnie la moins chère "
@@ -218,3 +209,10 @@ st.caption(f"Une ligne quand Airfox et Google Flights ont la même valeur dans l
            "Côté Google, seules les compagnies présentes dans le fichier Google Flights ci-dessus sont prises en compte. "
            + precisions)
 afficher_jointure(jointure_mc, len(airfox))
+# Rapport Excel (feuille 3) : la même jointure sur les fichiers complets, sans les filtres de la page
+complet_mc = jointure_moins_chere(df.assign(**{c: df[c].astype(str) for c in ("VilleDepart", "VilleArrivee",
+                                                                             "CodeTransporteur")}), vue)
+complet_mc[ECART] = (pd.to_numeric(complet_mc["Tarif Airfox"], errors="coerce")
+                     - pd.to_numeric(complet_mc["Tarif Google"], errors="coerce")).round(2)
+complet_mc.insert(complet_mc.columns.get_loc("FlagBagageInclus Google") + 1, MEME_BAGAGE, meme_bagage(complet_mc))
+st.session_state["rapport_jointure_moins_chere"] = complet_mc

@@ -12,6 +12,7 @@ import db
 import catalogue
 import recap
 from google_flights_scraper import Trajet, tableau_comparateur
+from titres import titre_page
 
 MAX_TRAJETS = 12  # au-delà, risque de blocage par Google
 LIBELLES_CLASSES = {"eco": "Économique", "premium": "Premium éco", "affaires": "Affaires", "premiere": "Première"}
@@ -106,7 +107,7 @@ with st.sidebar:
             st.rerun()
 
 
-st.title("Recherche détaillée")
+titre_page("Recherche détaillée", "recherche")
 
 # --- Recherche : base d'abord, Google Flights ensuite ------------------------
 if lancer:

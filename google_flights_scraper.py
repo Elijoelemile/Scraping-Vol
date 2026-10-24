@@ -301,7 +301,10 @@ async def scrape_many(trajets: list[Trajet], tous=False, visible=False,
                                                                  executable_path=str(chrome), locale="fr-FR")
             page = browser.pages[0] if browser.pages else await browser.new_page()
         else:
-            browser = await p.chromium.launch(headless=not visible)
+            try:
+                browser = await p.chromium.launch(headless=not visible)
+            except Exception:  # Chromium de Playwright absent (version portable) : Microsoft Edge, présent sur Windows
+                browser = await p.chromium.launch(headless=not visible, channel="msedge")
             page = await browser.new_page(locale="fr-FR")
         for i, t in enumerate(trajets, 1):
             label = f"[{i}/{len(trajets)}] {t.origine}→{t.destination} {t.date}" + (f"↔{t.retour}" if t.retour else "")

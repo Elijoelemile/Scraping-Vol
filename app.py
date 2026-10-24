@@ -7,17 +7,47 @@ import asyncio
 import streamlit as st
 
 import session_google
+import titres
 
 st.set_page_config(page_title="Comparateur de vols", page_icon="✈️", layout="wide")
 
-page = st.navigation([
-    st.Page("pages_app/page_donnees.py", title="Charger la donnée", icon="📂"),
-    st.Page("pages_app/page_catalogue.py", title="Catalogue (1 an)", icon="📅", default=True),
-    st.Page("pages_app/page_recherche.py", title="Recherche détaillée", icon="🔎"),
-    st.Page("pages_app/page_pays.py", title="Pays → pays", icon="🌍"),
-    st.Page("pages_app/page_airfox.py", title="Comparatif Airfox vs Google Flights", icon="⚖️"),
-    st.Page("pages_app/page_rapport.py", title="Rapport Excel", icon="📊"),
-])
+# Pages de la barre latérale, dans l'ordre, avec le thème (couleur) de leur titre
+PAGES = [
+    ("pages_app/page_donnees.py", "Charger la donnée", "📂", "donnee"),
+    ("pages_app/page_catalogue.py", "Catalogue (1 an)", "📅", "catalogue"),
+    ("pages_app/page_recherche.py", "Recherche détaillée", "🔎", "recherche"),
+    ("pages_app/page_pays.py", "Pays → pays", "🌍", "pays"),
+    ("pages_app/page_airfox.py", "Comparatif Airfox vs Google Flights", "⚖️", "comparatif"),
+    ("pages_app/page_dataviz.py", "Data Visualisation", "📈", "dataviz"),
+    ("pages_app/page_rapport.py", "Rapport Excel", "📊", "rapport"),
+    ("pages_app/page_assistant.py", "Assistant Décisionnel", "🤖", "assistant"),
+]
+page = st.navigation([st.Page(f, title=t, icon=i, default=f.endswith("page_catalogue.py")) for f, t, i, _ in PAGES])
+# Boutons de la barre latérale en forme de pilule, aux couleurs du titre de leur page : dégradé vertical (reflet
+# clair en haut, plus foncé en bas), cadre foncé, écriture noire normale
+st.markdown("<style>[data-testid='stSidebar'] {background: #faf6ec;}"  # fond « Floral White »
+            "[data-testid='stSidebarNav'] a span {color: #000 !important;}"
+            "[data-testid='stSidebarNav'] a p {font-weight: 400;}" + "".join(
+    f"[data-testid='stSidebarNav'] li:nth-child({n}) a {{"
+    f"background: linear-gradient(180deg, color-mix(in srgb, {clair} 45%, white) 0%, {clair} 50%,"
+    f" color-mix(in srgb, {clair} 80%, {fonce}) 100%);"
+    f" border: 2px solid {fonce}; border-radius: 999px; margin-bottom: .35rem;"
+    f" box-shadow: inset 0 2px 0 rgba(255,255,255,.55);}}"
+    f"[data-testid='stSidebarNav'] li:nth-child({n}) a:hover {{filter: brightness(1.07);}}"
+    for n, (_, _, _, theme) in enumerate(PAGES, start=1) for clair, fonce in [titres.COULEURS[theme]])
+    # Page en cours, « en gras » comme un bouton mis en avant : plus haute, épais cadre noir et ombre noire décalée
+    # (effet relief), écriture en gras légèrement espacée, icône agrandie ; elle garde la largeur de la barre
+    # latérale (elle suit son élargissement)
+    + "[data-testid='stSidebarNav'] a {transition: padding .15s ease, box-shadow .15s ease;}"
+    "[data-testid='stSidebarNav'] a[aria-current='page'] {padding-top: .6rem; padding-bottom: .6rem;"
+    " position: relative; z-index: 2; border: 3px solid #111 !important;"
+    " box-shadow: inset 0 3px 0 rgba(255,255,255,.6), -3px 5px 0 #111 !important; margin: .5rem 0 .9rem 3px;}"
+    "[data-testid='stSidebarNav'] a[aria-current='page'] p {font-weight: 800; font-size: 1.02rem;"
+    " letter-spacing: .03em;}"
+    "[data-testid='stSidebarNav'] a[aria-current='page'] > span:first-child {width: auto; margin-right: .6rem;}"
+    "[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stIconEmoji'] {font-size: 1.4rem;"
+    " line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35));}"
+    "</style>", unsafe_allow_html=True)
 
 
 def navigateur_chrome() -> bool:

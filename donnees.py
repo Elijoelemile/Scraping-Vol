@@ -78,7 +78,7 @@ def archiver_pdf() -> Path:
     pdf.set_font("Helvetica", "B", 18)
     pdf.cell(0, 12, texte("Historique du catalogue"), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 11)
-    pdf.cell(0, 8, texte(f"{maintenant:%d/%m/%Y à %H:%M} - {len(dest)} destinations"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, texte(f"{maintenant:%d/%m/%Y} à {maintenant:%H:%M} - {len(dest)} destinations"), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(4)
     pdf.set_font("Helvetica", "B", 10)
     for largeur, titre in ((25, "Code"), (85, "Ville"), (70, "Pays")):
@@ -121,3 +121,29 @@ def remplacer_catalogue(departs: list[str], arrivees: list[str]) -> dict:
 def historiques() -> list[Path]:
     """PDF archivés, du plus récent au plus ancien."""
     return sorted(DOSSIER_HISTORIQUE.glob("catalogue_*.pdf"), reverse=True) if DOSSIER_HISTORIQUE.exists() else []
+
+
+# --- Donnée chargée, gardée sur le disque : elle reste affichée tant qu'on ne la retire pas (croix du fichier) ------
+DOSSIER_DONNEE = Path(__file__).with_name("donnee_chargee")
+
+
+def garder(contenu: bytes, nom: str):
+    DOSSIER_DONNEE.mkdir(exist_ok=True)
+    for ancien in DOSSIER_DONNEE.iterdir():
+        ancien.unlink()
+    (DOSSIER_DONNEE / nom).write_bytes(contenu)
+
+
+def donnee_gardee() -> tuple[pd.DataFrame, str, int] | None:
+    """(table, nom du fichier, taille en octets) de la donnée chargée, ou None si aucune."""
+    fichiers = sorted(DOSSIER_DONNEE.iterdir()) if DOSSIER_DONNEE.exists() else []
+    if not fichiers:
+        return None
+    contenu = fichiers[0].read_bytes()
+    return lire_fichier(contenu, fichiers[0].name), fichiers[0].name, len(contenu)
+
+
+def retirer():
+    if DOSSIER_DONNEE.exists():
+        for f in DOSSIER_DONNEE.iterdir():
+            f.unlink()
