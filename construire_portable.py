@@ -7,9 +7,11 @@ double-cliquer sur « Lancer Scraping Vol.bat ». Rien à installer.
     .venv\\Scripts\\python.exe construire_portable.py
 """
 import shutil
+import sqlite3
 import sys
 import urllib.request
 import zipfile
+from contextlib import closing
 from pathlib import Path
 
 ICI = Path(__file__).parent
@@ -103,7 +105,11 @@ def main():
     app = PORTABLE / "app"
     app.mkdir()
     for f in FICHIERS:
-        if (ICI / f).exists():
+        if f == "vols.db" and (ICI / f).exists():
+            # copie cohérente même si une actualisation écrit dans la base en ce moment
+            with closing(sqlite3.connect(ICI / f)) as source, closing(sqlite3.connect(app / f)) as copie:
+                source.backup(copie)
+        elif (ICI / f).exists():
             shutil.copy2(ICI / f, app / f)
     for d in DOSSIERS:
         if (ICI / d).exists():

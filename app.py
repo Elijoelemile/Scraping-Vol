@@ -14,7 +14,7 @@ st.set_page_config(page_title="Comparateur de vols", page_icon="✈️", layout=
 # Pages de la barre latérale, dans l'ordre, avec le thème (couleur) de leur titre
 PAGES = [
     ("pages_app/page_donnees.py", "Charger la donnée", "📂", "donnee"),
-    ("pages_app/page_catalogue.py", "Catalogue (1 an)", "📅", "catalogue"),
+    ("pages_app/page_catalogue.py", "Catalogue aller-retour", "📅", "catalogue"),
     ("pages_app/page_recherche.py", "Recherche détaillée", "🔎", "recherche"),
     ("pages_app/page_pays.py", "Pays → pays", "🌍", "pays"),
     ("pages_app/page_airfox.py", "Comparatif Airfox vs Google Flights", "⚖️", "comparatif"),

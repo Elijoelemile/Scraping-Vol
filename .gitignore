@@ -25,6 +25,9 @@ actualisation.arret
 actualisation.log
 historique_actualisations/
 
+# Rythme des recherches Google, ajusté automatiquement (propre à ce PC et à sa connexion)
+rythme.json
+
 # Couleurs des graphiques choisies dans Data Visualisation (préférence de ce PC)
 couleurs_graphiques.json
 

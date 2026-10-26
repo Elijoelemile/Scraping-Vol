@@ -17,6 +17,7 @@ Commandes :
 import argparse
 import asyncio
 import json
+import os
 import random
 import re
 import sqlite3
@@ -837,17 +838,19 @@ async def collecter_annee(gf: GoogleFlights, d: str, nuits: int | None, fin: dat
 
 
 def duree_annee(n_destinations: int) -> int:
-    """Minutes estimées pour actualiser_annee (≈ 1,2 s par appel, 2 tranches × (1 + compagnies) par destination)."""
-    return max(1, round(n_destinations * 2 * (1 + COMPAGNIES_PAR_DESTINATION) * 1.2 / 60))
+    """Minutes estimées pour actualiser_annee (2 tranches × (1 + compagnies) appels par destination, espacés du délai
+    du rythme actuel)."""
+    return max(1, round(n_destinations * 2 * (1 + COMPAGNIES_PAR_DESTINATION) * lire_rythme()["delai"] / 60))
 
 
-async def actualiser_annee(destinations: list[str], nuits: int | None = None, delai: float = 1.2,
-                           on_progress=None, parallele: int = 4) -> int:
+async def actualiser_annee(destinations: list[str], nuits: int | None = None, delai: float | None = None,
+                           on_progress=None, parallele: int | None = None) -> int:
     """Toute l'année d'un coup pour ces destinations depuis Paris (aller simple ou aller-retour de `nuits` nuits).
     Chaque destination est enregistrée dès qu'elle est finie. Renvoie le nb de destinations avec prix.
     Lève Bloque si Google bloque."""
-    gf = GoogleFlights(delai)
-    places = asyncio.Semaphore(parallele)
+    rythme = lire_rythme()
+    gf = GoogleFlights(delai or rythme["delai"])
+    places = asyncio.Semaphore(parallele or rythme["parallele"])
     bloque = asyncio.Event()
     with closing(connexion()) as con:
         derniere = con.execute("SELECT MAX(date) FROM calendrier").fetchone()[0]
@@ -876,6 +879,7 @@ async def actualiser_annee(destinations: list[str], nuits: int | None = None, de
     finally:
         await gf.fermer()
     if bloque.is_set():
+        ajuster_rythme(bloque=True)
         raise Bloque()
     return trouvees
 
@@ -886,26 +890,83 @@ async def actualiser_annee(destinations: list[str], nuits: int | None = None, de
 FICHIER_ACTUALISATION = Path(__file__).with_name("actualisation.json")
 FICHIER_ARRET = Path(__file__).with_name("actualisation.arret")
 FICHIER_PAIRES = Path(__file__).with_name("actualisation_paires.json")  # les (destination, date) à rechercher
-SECONDES_PAR_RECHERCHE = 3.2  # mesuré (4 recherches en parallèle, 193 destinations en 10 min 20 s)
+# Rythme des recherches, adaptatif et gardé dans rythme.json : après un blocage de Google, on ralentit (délai × 1,5,
+# une seule recherche à la fois au-delà de 5 s) ; après chaque lot sans blocage, on accélère doucement (délai × 0,93),
+# jamais sous DELAI_MIN. Au départ : une demande toutes les 3 s, 2 recherches à la fois.
+FICHIER_RYTHME = Path(__file__).with_name("rythme.json")
+RYTHME_DEPART = {"delai": 3.0, "parallele": 2}
+DELAI_MIN, DELAI_MAX = 2.0, 10.0
+APPELS_PAR_RECHERCHE = 2.2  # une recherche = 1 à 3 appels à Google (pages de résultats, prix manquants)
+
+
+def lire_rythme() -> dict:
+    try:
+        r = json.loads(FICHIER_RYTHME.read_text(encoding="utf-8"))
+        delai = min(DELAI_MAX, max(DELAI_MIN, float(r["delai"])))
+        return {"delai": delai, "parallele": 1 if delai >= 5 else 2}
+    except (FileNotFoundError, PermissionError, ValueError, KeyError, TypeError):
+        return dict(RYTHME_DEPART)
+
+
+def ajuster_rythme(bloque: bool) -> dict:
+    """Ralentit après un blocage, accélère doucement après un lot sans blocage ; renvoie le nouveau rythme."""
+    delai = lire_rythme()["delai"]
+    delai = min(DELAI_MAX, delai * 1.5) if bloque else max(DELAI_MIN, delai * 0.93)
+    rythme = {"delai": round(delai, 2), "parallele": 1 if delai >= 5 else 2}
+    try:
+        FICHIER_RYTHME.write_text(json.dumps(rythme), encoding="utf-8")
+    except OSError:
+        pass
+    return rythme
+
+
+def secondes_par_recherche() -> float:
+    """Durée moyenne d'une recherche au rythme actuel (les appels à Google partent un par un, espacés du délai)."""
+    return lire_rythme()["delai"] * APPELS_PAR_RECHERCHE
+
+
+def texte_rythme(r: dict | None = None) -> str:
+    r = r or lire_rythme()
+    return (f"1 demande toutes les {r['delai']:.1f} s".replace(".", ",")
+            + (f", {r['parallele']} recherches à la fois" if r["parallele"] > 1 else ", une recherche à la fois"))
+
+
 PAUSE_BLOCAGE_MIN = 30        # attente après un blocage de Google, puis reprise automatique
+PAUSE_REGULIERE_MIN = 5       # pause de précaution toutes les RECHERCHES_ENTRE_PAUSES recherches…
+RECHERCHES_ENTRE_PAUSES = 1000  # …sans compter celles déjà suivies d'une pause de blocage
 MAX_BLOCAGES = 12             # blocages tolérés d'affilée avant l'arrêt
 LOT_FOND = 40                 # recherches par lot (≈ 2 min) : l'arrêt est pris en compte entre deux lots
 
 
 def _ecrire_actualisation(**champs):
-    etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8")) if FICHIER_ACTUALISATION.exists() else {}
-    etat_fond |= champs | {"maj": datetime.now().isoformat(timespec="seconds")}
-    temporaire = FICHIER_ACTUALISATION.with_suffix(".tmp")
-    temporaire.write_text(json.dumps(etat_fond, ensure_ascii=False), encoding="utf-8")
-    temporaire.replace(FICHIER_ACTUALISATION)
+    """Met à jour l'avancement. Sous Windows, remplacer le fichier échoue (« Accès refusé ») si l'application est en
+    train de le lire (toutes les 3 s) : on réessaie un moment ; une mise à jour qui échoue quand même est sautée,
+    jamais au point d'arrêter les recherches."""
+    for essai in range(60):
+        try:
+            etat_fond = (json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+                         if FICHIER_ACTUALISATION.exists() else {})
+            etat_fond |= champs | {"maj": datetime.now().isoformat(timespec="seconds")}
+            temporaire = FICHIER_ACTUALISATION.with_suffix(".tmp")
+            temporaire.write_text(json.dumps(etat_fond, ensure_ascii=False), encoding="utf-8")
+            temporaire.replace(FICHIER_ACTUALISATION)
+            return
+        except (PermissionError, json.JSONDecodeError):  # fichier ouvert par l'application à cet instant
+            time.sleep(0.05 + 0.05 * (essai % 5))
 
 
 def etat_actualisation() -> dict | None:
     """Avancement de l'actualisation en arrière-plan, ou None.
     Un processus qui ne donne plus de nouvelles depuis 15 min (veille, arrêt de l'ordinateur) est « interrompue »."""
-    try:
-        etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
+    for essai in range(5):
+        try:
+            etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+            break
+        except FileNotFoundError:
+            return None
+        except (PermissionError, json.JSONDecodeError):  # en cours de remplacement : on relit un instant après
+            time.sleep(0.03)
+    else:
         return None
     attendu = datetime.fromisoformat(etat_fond.get("reprise_a") or etat_fond["maj"])
     if etat_fond.get("statut") in ("en cours", "pause") and datetime.now() - max(
@@ -932,8 +993,10 @@ def lancer_actualisation(paires: list[tuple[str, str]], origines: list[str], nui
                           debut=datetime.now().isoformat(timespec="seconds"), reprise_a=None, blocages=0)
     journal = open(Path(__file__).with_name("actualisation.log"), "a", encoding="utf-8")
     drapeaux = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if sys.platform == "win32" else 0
+    # journal en UTF-8 (sinon Windows écrit en cp1251/cp1252 et un message accentué fait planter le processus)
     subprocess.Popen([sys.executable, str(Path(__file__)), "actualiser-fond"], cwd=Path(__file__).parent,
-                     stdout=journal, stderr=journal, creationflags=drapeaux, start_new_session=sys.platform != "win32")
+                     stdout=journal, stderr=journal, creationflags=drapeaux, start_new_session=sys.platform != "win32",
+                     env=os.environ | {"PYTHONIOENCODING": "utf-8"})
 
 
 def arreter_actualisation():
@@ -960,6 +1023,30 @@ def archiver_actualisation():
         json.dumps(etat_fond | {"id": ident}, ensure_ascii=False), encoding="utf-8")
 
 
+def heures_blocages(bilan: dict) -> list[datetime]:
+    """Heures des blocages de Google pendant une actualisation : celles notées par l'actualisation, sinon (actualisations
+    plus anciennes) celles du journal actualisation.log comprises entre son début et sa fin."""
+    if "heures_blocages" in bilan:
+        return [datetime.fromisoformat(h) for h in bilan["heures_blocages"]]
+    journal = Path(__file__).with_name("actualisation.log")
+    if not journal.exists() or not bilan.get("debut"):
+        return []
+    debut = datetime.fromisoformat(bilan["debut"])
+    fin = datetime.fromisoformat(bilan.get("fin") or bilan.get("maj") or bilan["debut"])
+    heures = []
+    for ligne in journal.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = re.match(r"(\d\d)/(\d\d) (\d\d):(\d\d):(\d\d) blocage", ligne)
+        if m:
+            jour, mois, h, mi, se = map(int, m.groups())
+            try:
+                t = datetime(debut.year, mois, jour, h, mi, se)
+            except ValueError:
+                continue
+            if debut <= t <= fin:
+                heures.append(t)
+    return heures
+
+
 def historique_actualisations() -> list[dict]:
     """Bilans des actualisations passées, de la plus récente à la plus ancienne."""
     if not DOSSIER_HISTORIQUE_ACTUALISATIONS.exists():
@@ -984,6 +1071,8 @@ async def actualisation_fond():
     incompletes = []  # encore en erreur après la dernière passe
     pause_s = etat_fond.get("pause_s", 0)  # temps passé en pause après un blocage de Google
     derniere_passe = False
+    depuis_pause = 0  # recherches faites depuis la dernière pause (de précaution ou de blocage)
+    heures_blocages = list(etat_fond.get("heures_blocages", []))  # heure de chaque blocage (historique)
     while i < len(paires) or (echecs and not derniere_passe):
         if i >= len(paires):
             # Dernière passe : les dates restées en erreur sont redemandées une fois, plus tard (Google répond mieux)
@@ -997,19 +1086,40 @@ async def actualisation_fond():
         lot = paires[i:i + LOT_FOND]
         try:
             echecs_lot = []
+            rythme = lire_rythme()
+            _ecrire_actualisation(rythme=texte_rythme(rythme))
             trouvees += await actualiser_direct(
-                lot, origines, nuits=nuits, echecs=echecs_lot,
+                lot, origines, nuits=nuits, echecs=echecs_lot, delai=rythme["delai"], parallele=rythme["parallele"],
                 on_progress=lambda k, total, msg: _ecrire_actualisation(faites=i + k, message=msg))
             i += len(lot)
             blocages = 0
+            ajuster_rythme(bloque=False)  # lot sans blocage : on accélère doucement
             if derniere_passe:
                 incompletes.extend(echecs_lot)
             else:
                 echecs.extend(echecs_lot)
             _ecrire_actualisation(faites=i, trouvees=trouvees, statut="en cours", reprise_a=None,
                                   echecs=[list(x) for x in echecs], incompletes=len(echecs) + len(incompletes))
+            # Pause de précaution : Google tolère moins un volume continu de recherches depuis la même adresse
+            depuis_pause += len(lot)
+            if depuis_pause >= RECHERCHES_ENTRE_PAUSES and i < len(paires):
+                reprise = datetime.now() + timedelta(minutes=PAUSE_REGULIERE_MIN)
+                _ecrire_actualisation(statut="pause", reprise_a=reprise.isoformat(timespec="seconds"),
+                                      message=f"pause de précaution ({depuis_pause} recherches d'affilée) : "
+                                              f"reprise à {reprise:%H:%M}")
+                print(f"{datetime.now():%d/%m %H:%M:%S} pause de précaution après {depuis_pause} recherches",
+                      flush=True)
+                while datetime.now() < reprise and not FICHIER_ARRET.exists():
+                    await asyncio.sleep(20)
+                    _ecrire_actualisation()  # signe de vie pendant la pause
+                depuis_pause = 0
+                _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…")
         except Bloque as e:
-            print(f"{datetime.now():%d/%m %H:%M:%S} blocage : {e}", flush=True)  # journal actualisation.log
+            rythme = ajuster_rythme(bloque=True)  # blocage : on ralentit pour la reprise
+            print(f"{datetime.now():%d/%m %H:%M:%S} blocage : {e} — nouveau rythme : {texte_rythme(rythme)}",
+                  flush=True)  # journal actualisation.log
+            heures_blocages.append(datetime.now().isoformat(timespec="seconds"))
+            _ecrire_actualisation(rythme=texte_rythme(rythme), heures_blocages=heures_blocages)
             blocages += 1
             if blocages > MAX_BLOCAGES:
                 _ecrire_actualisation(statut="bloquée", faites=i, message="Google bloque toujours : relancez plus tard",
@@ -1026,6 +1136,7 @@ async def actualisation_fond():
                 await asyncio.sleep(20)
                 _ecrire_actualisation()  # signe de vie pendant la pause
             pause_s += (datetime.now() - debut_pause).total_seconds()
+            depuis_pause = 0  # la pause de blocage tient lieu de pause de précaution
             _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…", pause_s=round(pause_s))
     _ecrire_actualisation(statut="terminée", faites=i, trouvees=trouvees, incompletes=len(incompletes),
                           message="terminée" + (f" ; {len(incompletes)} date(s) restée(s) sans réponse de Google"
@@ -1442,12 +1553,16 @@ def enregistrer_calendrier(o: str, d: str, prix: dict[str, int]):
 
 # --- Lecture (pour l'application) ----------------------------------------------------
 def etat() -> dict:
+    """Trajets de la donnée chargée, dates déjà recherchées en aller-retour, dernière actualisation."""
     with closing(connexion()) as con:
-        r = con.execute("SELECT COUNT(*), COUNT(collecte_le), COUNT(DISTINCT origine), MIN(collecte_le),"
-                        " MAX(collecte_le) FROM trajets_catalogue").fetchone()
-        jours = con.execute("SELECT COUNT(*) FROM calendrier").fetchone()[0]
-    return {"trajets": r[0], "trajets_collectes": r[1], "origines": r[2], "plus_ancienne": r[3],
-            "plus_recente": r[4], "prix_journaliers": jours}
+        trajets_, destinations = con.execute(
+            "SELECT COUNT(*), COUNT(DISTINCT destination) FROM trajets_catalogue").fetchone()
+        recherches = con.execute("SELECT COUNT(*) FROM (SELECT DISTINCT destination, date, date_retour FROM vols_jour"
+                                 " WHERE date_retour != '')").fetchone()[0]
+        dernieres = [con.execute(f"SELECT MAX(collecte_le) FROM {t}").fetchone()[0] for t in ("vols_jour", "vols_annee")]
+    dernieres = [x for x in dernieres if x]
+    return {"trajets": trajets_, "destinations": destinations, "recherches": recherches,
+            "derniere_collecte": max(dernieres) if dernieres else None}
 
 
 def trajets(origine: str | None = None) -> pd.DataFrame:
@@ -1703,6 +1818,9 @@ def main():
     sub.add_parser("actualiser-fond", help="(lancé par l'application) recherches d'actualisation.json en arrière-plan")
     a = ap.parse_args()
     if a.cmd == "actualiser-fond":
+        for flux in (sys.stdout, sys.stderr):  # même lancé autrement : le journal accepte les accents
+            if flux and hasattr(flux, "reconfigure"):
+                flux.reconfigure(encoding="utf-8", errors="replace")
         try:
             asyncio.run(actualisation_fond())
         except Exception as e:  # le statut dit pourquoi tout s'est arrêté
