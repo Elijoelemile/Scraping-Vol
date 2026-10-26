@@ -70,7 +70,7 @@ CLE_TRAJET = ["origine", "destination", "date_aller", "date_retour", "adultes", 
 
 
 def connexion(path: Path = DB_PATH) -> sqlite3.Connection:
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path, timeout=30)  # base occupée : attendre jusqu'à 30 s (même base que catalogue.py, en WAL)
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(SCHEMA)
     # Mise à niveau des bases créées avant l'ajout des logos

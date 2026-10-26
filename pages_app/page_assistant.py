@@ -26,7 +26,7 @@ def lire_routines() -> list[dict]:
         return []
 
 
-titre_page("IA décisionnel", "assistant")
+titre_page("IA décisionnelle", "assistant")
 
 etiquettes_moyennes()
 st.text_area("Que veux-tu que je fasse ?", key="demande",

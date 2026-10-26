@@ -163,7 +163,11 @@ class PlageInvalide(Exception):
 
 
 def connexion(path: Path = DB_PATH) -> sqlite3.Connection:
-    con = sqlite3.connect(path)
+    # timeout : si la base est occupée, attendre jusqu'à 30 s au lieu de 5 avant « database is locked »
+    con = sqlite3.connect(path, timeout=30)
+    # mode WAL (gardé dans le fichier) : les lectures de l'application ne bloquent plus les écritures de
+    # l'actualisation en arrière-plan, et inversement
+    con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
     # Mise à niveau des bases créées avant l'ajout des horaires
     colonnes = {r[1] for r in con.execute("PRAGMA table_info(vols_jour)")}
@@ -248,8 +252,10 @@ class GoogleFlights:
             m = re.search(r'\[(\d+),null,\[\["type', r.text)
             if m and m.group(1) == "3":
                 raise PlageInvalide()
+            # code d'erreur de Google : « [3,null,[["type… » ou « ["wrb.fr",null,null,null,null,[13]] »
+            code = m or re.search(r'"wrb\.fr",null,null,null,null,\[(\d+)\]', r.text)
             self.dernier_echec = (f"réponse HTTP {r.status_code} sans données"
-                                  + (f" (code Google {m.group(1)})" if m else f" : {r.text[:80]!r}"))
+                                  + (f" (code Google {code.group(1)})" if code else ""))
         self.echecs_suite += 1
         return None
 
@@ -745,7 +751,8 @@ async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], 
                     return
                 except PlageInvalide:
                     break  # recherche refusée par Google (date hors calendrier…) : inutile de redemander
-                except (ErreurGoogle, httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+                except (ErreurGoogle, httpx.HTTPError, ValueError, KeyError, IndexError, TypeError,
+                        sqlite3.OperationalError):  # base occupée trop longtemps : on refait la recherche
                     continue  # rien n'est enregistré pour cette date : on redemande
                 if avec_vols or aucun_vol_vu or not CONFIRMER_AUCUN_VOL:
                     break
@@ -890,6 +897,7 @@ async def actualiser_annee(destinations: list[str], nuits: int | None = None, de
 FICHIER_ACTUALISATION = Path(__file__).with_name("actualisation.json")
 FICHIER_ARRET = Path(__file__).with_name("actualisation.arret")
 FICHIER_PAIRES = Path(__file__).with_name("actualisation_paires.json")  # les (destination, date) à rechercher
+FICHIER_REPRENDRE = Path(__file__).with_name("actualisation.reprendre")  # demande : finir la pause tout de suite
 # Rythme des recherches, adaptatif et gardé dans rythme.json : après un blocage de Google, on ralentit (délai × 1,5,
 # une seule recherche à la fois au-delà de 5 s) ; après chaque lot sans blocage, on accélère doucement (délai × 0,93),
 # jamais sous DELAI_MIN. Au départ : une demande toutes les 3 s, 2 recherches à la fois.
@@ -984,6 +992,7 @@ def lancer_actualisation(paires: list[tuple[str, str]], origines: list[str], nui
     """Démarre les recherches de ces (destination, date) dans un processus à part."""
     import subprocess
     FICHIER_ARRET.unlink(missing_ok=True)
+    FICHIER_REPRENDRE.unlink(missing_ok=True)
     FICHIER_ACTUALISATION.unlink(missing_ok=True)
     FICHIER_PAIRES.write_text(json.dumps([list(x) for x in paires]), encoding="utf-8")
     jours = sorted(j for _, j in paires)
@@ -991,16 +1000,63 @@ def lancer_actualisation(paires: list[tuple[str, str]], origines: list[str], nui
                           periode=[jours[0], jours[-1]] if jours else None,
                           total=len(paires), faites=0, trouvees=0, statut="en cours", message="démarrage…",
                           debut=datetime.now().isoformat(timespec="seconds"), reprise_a=None, blocages=0)
-    journal = open(Path(__file__).with_name("actualisation.log"), "a", encoding="utf-8")
     drapeaux = (subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW) if sys.platform == "win32" else 0
-    # journal en UTF-8 (sinon Windows écrit en cp1251/cp1252 et un message accentué fait planter le processus)
-    subprocess.Popen([sys.executable, str(Path(__file__)), "actualiser-fond"], cwd=Path(__file__).parent,
-                     stdout=journal, stderr=journal, creationflags=drapeaux, start_new_session=sys.platform != "win32",
-                     env=os.environ | {"PYTHONIOENCODING": "utf-8"})
+    # Lanceur intermédiaire qui démarre l'actualisation puis se termine aussitôt : l'actualisation n'est plus
+    # rattachée au serveur Streamlit, et ni son redémarrage ni la fermeture de sa fenêtre ne l'arrêtent.
+    # Journal en UTF-8 (sinon Windows écrit en cp1251/cp1252 et un message accentué fait planter le processus).
+    lanceur = ("import subprocess, sys\n"
+               "journal = open(sys.argv[2], 'a', encoding='utf-8')\n"
+               "subprocess.Popen([sys.executable, sys.argv[1], 'actualiser-fond'], stdout=journal, stderr=journal,"
+               f" creationflags={drapeaux}, close_fds=True)\n")
+    subprocess.run([sys.executable, "-c", lanceur, str(Path(__file__)), str(Path(__file__).with_name("actualisation.log"))],
+                   cwd=Path(__file__).parent, creationflags=drapeaux, env=os.environ | {"PYTHONIOENCODING": "utf-8"},
+                   timeout=60, check=False)
 
 
 def arreter_actualisation():
     FICHIER_ARRET.touch()
+
+
+def reprendre_maintenant():
+    """Finit tout de suite la pause en cours (blocage de Google ou pause de précaution)."""
+    FICHIER_REPRENDRE.touch()
+
+
+async def _attendre_reprise(reprise: datetime):
+    """Pause jusqu'à `reprise`, interrompue par « Arrêter » ou « Reprendre maintenant » (vérifiés toutes les 2 s)."""
+    FICHIER_REPRENDRE.unlink(missing_ok=True)
+    battement = time.monotonic()
+    while datetime.now() < reprise and not FICHIER_ARRET.exists() and not FICHIER_REPRENDRE.exists():
+        await asyncio.sleep(2)
+        if time.monotonic() - battement >= 20:
+            _ecrire_actualisation()  # signe de vie pendant la pause
+            battement = time.monotonic()
+    FICHIER_REPRENDRE.unlink(missing_ok=True)
+
+
+def recherches_restantes() -> list[tuple[str, str]]:
+    """(destination, date) de la dernière actualisation qui n'ont pas encore été recherchées (avec ou sans vol), pour
+    la reprendre là où elle s'est arrêtée ; liste vide si elle est introuvable ou complète."""
+    try:
+        etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+        paires = [tuple(x) for x in json.loads(FICHIER_PAIRES.read_text(encoding="utf-8"))]
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError):
+        return []
+    nuits, origines = etat_fond.get("nuits"), etat_fond.get("origines") or []
+    cherches = set(zip(*[vols_jour_tableau(sorted(set(origines) | set(PARIS_AEROPORTS)), nuits)[c]
+                         for c in ("destination", "date")]))
+    return [p for p in paires if p not in cherches]
+
+
+def reprendre_actualisation() -> int:
+    """Relance la dernière actualisation sur ses recherches restantes, avec les mêmes départs et nuits."""
+    restantes = recherches_restantes()
+    if restantes:
+        etat_fond = json.loads(FICHIER_ACTUALISATION.read_text(encoding="utf-8"))
+        libelle = etat_fond.get("libelle", "")
+        lancer_actualisation(restantes, etat_fond.get("origines") or [], etat_fond.get("nuits"),
+                             libelle if libelle.endswith("(reprise)") else f"{libelle} (reprise)")
+    return len(restantes)
 
 
 # Historique : à la fin de chaque actualisation, son bilan (période, heure, durée) est copié dans
@@ -1109,9 +1165,7 @@ async def actualisation_fond():
                                               f"reprise à {reprise:%H:%M}")
                 print(f"{datetime.now():%d/%m %H:%M:%S} pause de précaution après {depuis_pause} recherches",
                       flush=True)
-                while datetime.now() < reprise and not FICHIER_ARRET.exists():
-                    await asyncio.sleep(20)
-                    _ecrire_actualisation()  # signe de vie pendant la pause
+                await _attendre_reprise(reprise)
                 depuis_pause = 0
                 _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…")
         except Bloque as e:
@@ -1130,11 +1184,7 @@ async def actualisation_fond():
                                   reprise_a=reprise.isoformat(timespec="seconds"),
                                   message=f"Google bloque ({e or 'captcha'}) : reprise à {reprise:%H:%M}")
             debut_pause = datetime.now()
-            while datetime.now() < reprise:
-                if FICHIER_ARRET.exists():
-                    break
-                await asyncio.sleep(20)
-                _ecrire_actualisation()  # signe de vie pendant la pause
+            await _attendre_reprise(reprise)
             pause_s += (datetime.now() - debut_pause).total_seconds()
             depuis_pause = 0  # la pause de blocage tient lieu de pause de précaution
             _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…", pause_s=round(pause_s))

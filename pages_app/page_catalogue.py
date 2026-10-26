@@ -49,7 +49,7 @@ def suivi_actualisation():
                  else (total - faites) * catalogue.secondes_par_recherche())
         fin_prevue = datetime.now() + timedelta(seconds=reste)
         jour_fin = "" if fin_prevue.date() == date.today() else f" le {fin_prevue:%d/%m}"
-        with st.container(border=True):
+        with st.container(border=True, key="cadre_suivi"):  # cadre aux couleurs de la page (titres.py)
             st.progress(min(1.0, faites / total),
                         text=f"**{e.get('libelle', '')}** : {faites}/{total} recherches ({100 * faites / total:.0f} %)"
                              f" · {e.get('message', '')}")
@@ -57,11 +57,18 @@ def suivi_actualisation():
                        + f" · en cours depuis **{temps_texte(ecoule)}** · reste environ **{temps_texte(reste)}**"
                        f" · fin prévue vers **{fin_prevue:%H:%M}{jour_fin}**"
                        + (f" · rythme : {e['rythme']}" if e.get("rythme") else "") if debut else "")
-            c1, c2 = st.columns(2)
+            en_pause = e["statut"] == "pause"
+            c1, c2, *c3 = st.columns(3 if en_pause else 2)
+            # pendant une pause : choisir de ne pas attendre (au risque d'un nouveau blocage si Google bloque encore)
+            if en_pause and c3[0].button("▶️ Reprendre maintenant", type="primary", width="stretch",
+                                         help="Finit la pause tout de suite au lieu d'attendre l'heure de reprise. "
+                                              "Si Google bloque encore, une nouvelle pause commencera."):
+                catalogue.reprendre_maintenant()
+                st.toast("Reprise demandée : elle a lieu dans quelques secondes.")
             if c1.button("🔃 Voir les résultats déjà obtenus", width="stretch"):
                 st.rerun(scope="app")
             if c2.button("⏹ Arrêter", width="stretch", help="Les recherches déjà faites sont gardées ; "
-                                                             "« Compléter » reprendra là où elles se sont arrêtées."):
+                                                             "le bouton « Reprendre » permettra de continuer là où elles se sont arrêtées."):
                 catalogue.arreter_actualisation()
                 st.toast("Arrêt demandé : il prend effet après les recherches en cours (≈ 2 min).")
         return
@@ -69,10 +76,8 @@ def suivi_actualisation():
         st.rerun(scope="app")  # actualisation finie : nouveau tableau
     messages = {"terminée": st.success, "arrêtée": st.info, "bloquée": st.warning, "interrompue": st.warning,
                 "erreur": st.error}
-    suite = {"terminée": "", "arrêtée": " Cliquez sur « Compléter » pour reprendre.",
-             "bloquée": " Relancez « Compléter » plus tard.",
-             "interrompue": " (ordinateur en veille ou application arrêtée ?) Cliquez sur « Compléter » pour reprendre.",
-             "erreur": " Cliquez sur « Compléter » pour reprendre."}
+    suite = {"terminée": "", "arrêtée": "", "bloquée": " Reprenez-la un peu plus tard.",
+             "interrompue": " (ordinateur en veille ou application arrêtée ?)", "erreur": ""}
     fin = datetime.fromisoformat(e.get("fin") or e["maj"])
     duree_reelle = (f" en **{temps_texte((fin - debut).total_seconds())}** (du {debut:%d/%m %H:%M} au "
                     f"{fin:%d/%m %H:%M})" if debut else "")
@@ -80,6 +85,22 @@ def suivi_actualisation():
         f"Dernière actualisation ({e.get('libelle', '')}) : {e['statut']}{duree_reelle}, {faites}/{total} recherches, "
         f"{e.get('trouvees', 0)} avec vols. {e.get('message', '') if e['statut'] in ('erreur', 'terminée') else ''}"
         + suite.get(e["statut"], ""))
+    # Reprise en un clic, juste sous le message : les recherches restantes, mêmes départs et même nombre de nuits
+    restantes = recherches_restantes_affichees(e.get("debut"), e.get("maj"))
+    if restantes and (e["statut"] != "terminée" or e.get("incompletes")):
+        if st.button(f"▶️ Reprendre ({restantes} recherches restantes, {duree_texte(restantes)})", type="primary",
+                     key="reprendre_actualisation",
+                     help="Relance cette actualisation là où elle s'est arrêtée : seulement les recherches pas "
+                          "encore faites, avec les mêmes départs et le même nombre de nuits."):
+            catalogue.reprendre_actualisation()
+            st.session_state["suivi_actif"] = True
+            st.rerun(scope="app")
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def recherches_restantes_affichees(debut, maj) -> int:
+    """Nombre de recherches restantes de la dernière actualisation (gardé 60 s : le suivi est relu toutes les 3 s)."""
+    return len(catalogue.recherches_restantes())
 
 
 
@@ -204,21 +225,26 @@ if tous.empty:
 origines = tous.groupby("origine")["ville_depart"].first().fillna("")
 
 # --- Choix : départs, villes d'arrivée, compagnies, dates de départ, nombre de nuits -------------------------------
-codes_origines = sorted(origines.index, key=lambda o: (nom_aeroport(o, origines[o]), o))
-if "departs" not in st.session_state:
-    st.session_state["departs"] = []
-st.session_state["departs"] = [o for o in st.session_state["departs"] if o in codes_origines]
+# Départ choisi par ville : « Paris » = ses 4 aéroports (CDG, ORY, BVA, XCR), recherchés ensemble comme sur Google
+# Flights ; un aéroport hors de ces villes reste proposé seul.
+villes_depart = {}
+for o in origines.index:
+    villes_depart.setdefault("PAR" if o in PARIS else o, []).append(o)
+noms_villes_depart = {v: "Paris" if v == "PAR" else f"{nom_aeroport(v, origines[v])} ({v})" for v in villes_depart}
+codes_villes = sorted(villes_depart, key=noms_villes_depart.get)
+if "villes_depart" not in st.session_state:
+    st.session_state["villes_depart"] = []
+st.session_state["villes_depart"] = [v for v in st.session_state["villes_depart"] if v in codes_villes]
 f1, f2 = st.columns(2)
-departs = f1.multiselect("Départ", codes_origines, key="departs", placeholder="Choisir des aéroports de départ",
-                         format_func=lambda o: f"{nom_aeroport(o, origines[o])} ({o})")
-paris = [o for o in PARIS if o in codes_origines]
-f1.button("Tous les aéroports de Paris", disabled=not paris,
-          on_click=lambda: st.session_state.update({"departs": paris}))
+choix_depart = f1.multiselect("Départ", codes_villes, key="villes_depart", placeholder="Choisir une ville de départ",
+                              format_func=noms_villes_depart.get,
+                              help="Paris : les 4 aéroports (Charles de Gaulle, Orly, Beauvais, Vatry) en même temps")
+departs = sorted(a for v in choix_depart for a in villes_depart[v])  # aéroports utilisés pour la recherche
 trajets_dep = tous[tous["origine"].isin(departs)]
 villes = f2.multiselect("Villes d'arrivée", sorted(trajets_dep["ville_arrivee"].dropna().unique()),
                         placeholder=f"Toutes ({trajets_dep['destination'].nunique()} destinations)")
 if not departs:
-    st.info("Choisissez au moins un aéroport de départ (ou « Tous les aéroports de Paris »).")
+    st.info("Choisissez une ville de départ (par exemple Paris).")
     st.stop()
 if villes:
     trajets_dep = trajets_dep[trajets_dep["ville_arrivee"].isin(villes)]

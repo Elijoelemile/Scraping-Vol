@@ -24,7 +24,8 @@ URL_PYTHON = f"https://www.python.org/ftp/python/{VERSION_PYTHON}/python-{VERSIO
 # (session Google, adresse e-mail des alertes), ni d'actualisation en cours.
 FICHIERS = ["app.py", "catalogue.py", "db.py", "donnees.py", "google_flights_scraper.py", "pays.py", "recap.py",
             "session_google.py", "titres.py", "alerte.py", "actions.py", "origines.txt", "requirements.txt", "README.md", "vols.db"]
-DOSSIERS = ["pages_app", "listes", "donnee_chargee", "historique_catalogue", "historique_actualisations"]
+DOSSIERS = ["pages_app", "listes", "donnee_chargee", "historique_catalogue", "historique_actualisations",
+            ".streamlit"]  # .streamlit : réglages (police Montserrat)
 
 LANCEUR = r"""@echo off
 chcp 65001 >nul

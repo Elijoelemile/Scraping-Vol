@@ -129,10 +129,35 @@ def quadrillage_clair(graphique):
         graphique.title.overlay = False
 
 
-def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, choix_1a: dict | None = None,
+def tableau_donnees(ws, col_debut: int, col_fin: int, entete: int, fin: int, nom: str):
+    """Données d'un graphique en tableau Excel stylé, comme les tables des autres feuilles : en-tête bleu, lignes
+    alternées, filtres ; colonnes assez larges pour leurs en-têtes."""
+    from openpyxl.utils import get_column_letter
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+    table = Table(displayName=nom, ref=f"{get_column_letter(col_debut)}{entete}:{get_column_letter(col_fin)}{fin}")
+    table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    ws.add_table(table)
+    for col in range(col_debut, col_fin + 1):
+        lettre = get_column_letter(col)
+        ws.column_dimensions[lettre].width = max(ws.column_dimensions[lettre].width or 0,
+                                                 len(str(ws.cell(row=entete, column=col).value or "")) + 4, 12)
+
+
+def airfox_plus_cher(ws, col_airfox: int, col_google: int, debut: int, fin: int):
+    """Case Airfox en rouge (même rouge que les écarts positifs) quand Airfox est plus cher que Google ce jour-là."""
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    a, g = get_column_letter(col_airfox), get_column_letter(col_google)
+    ws.conditional_formatting.add(f"{a}{debut}:{a}{fin}", FormulaRule(
+        formula=[f"AND(ISNUMBER({a}{debut}),ISNUMBER({g}{debut}),{a}{debut}>{g}{debut})"],
+        font=Font(color="000000", bold=True), fill=PatternFill("solid", bgColor="FFCDD2")))
+
+
+def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, choix_graphique: dict | None = None,
                        couleurs: tuple = ("2A78D6", "111111")):
     """Feuille 4 : les deux graphiques de la page Data Visualisation, en graphiques Excel (modifiables), avec
-    leurs données en dessous. 1A : écart médian par compagnie ; 2A : Airfox face au prix le plus bas de Google,
+    leurs données en dessous. graphique « même compagnie » : tarifs date par date ; graphique « moins chère » : Airfox face au prix le plus bas de Google,
     pour la destination la plus comparée."""
     from openpyxl.chart import BarChart, LineChart, Reference
     from openpyxl.chart.label import DataLabelList
@@ -143,32 +168,32 @@ def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, ch
     ws.sheet_view.showGridLines = False
     for col in range(1, 18):
         ws.column_dimensions[chr(64 + col)].width = 13
-    # --- 1A : tarif Airfox et Google à chaque date, pour la destination la plus comparée (30 premières dates)
+    # --- Graphique « même compagnie » : tarif Airfox et Google à chaque date, pour la destination la plus comparée (30 premières dates)
     if len(jointure):
         j = jointure.assign(Date=pd.to_datetime(jointure["DateAller"], dayfirst=True, errors="coerce"),
                             **{c: pd.to_numeric(jointure[c], errors="coerce") for c in ("Tarif Airfox", "Tarif Google")})
         # destination et période choisies dans la page Data Visualisation ; sinon la plus comparée, 30 premières dates
-        depart_1a = (choix_1a or {}).get("depart") or str(j["VilleDepart"].iloc[0])
-        j = j[j["VilleDepart"].astype(str) == depart_1a]  # ville de départ choisie dans Data Visualisation
+        depart_cie = (choix_graphique or {}).get("depart") or str(j["VilleDepart"].iloc[0])
+        j = j[j["VilleDepart"].astype(str) == depart_cie]  # ville de départ choisie dans Data Visualisation
         for cle, colonne in (("aeroport_depart", "AeroportDepart"), ("aeroport_arrivee", "AeroportArrivee")):
-            if (choix_1a or {}).get(cle, "Tous") != "Tous":  # aéroport choisi : seulement ses tarifs
-                j = j[j[colonne] == choix_1a[cle]]
+            if (choix_graphique or {}).get(cle, "Tous") != "Tous":  # aéroport choisi : seulement ses tarifs
+                j = j[j[colonne] == choix_graphique[cle]]
         if j.empty:  # aucune comparaison au départ de cette ville
-            ville_1a, d1 = "", pd.DataFrame()
-        elif choix_1a and choix_1a["ville"] in set(j["VilleArrivee"]):
-            ville_1a, debut_1a, fin_1a = choix_1a["ville"], pd.Timestamp(choix_1a["debut"]), pd.Timestamp(choix_1a["fin"])
+            ville_cie, d1 = "", pd.DataFrame()
+        elif choix_graphique and choix_graphique["ville"] in set(j["VilleArrivee"]):
+            ville_cie, debut_cie, fin_cie = choix_graphique["ville"], pd.Timestamp(choix_graphique["debut"]), pd.Timestamp(choix_graphique["fin"])
         else:
-            ville_1a = j["VilleArrivee"].value_counts().index[0]
-            dates_ville = j.loc[j["VilleArrivee"] == ville_1a, "Date"].sort_values()
-            debut_1a, fin_1a = dates_ville.iloc[0], dates_ville.iloc[min(len(dates_ville), 30) - 1]
+            ville_cie = j["VilleArrivee"].value_counts().index[0]
+            dates_ville = j.loc[j["VilleArrivee"] == ville_cie, "Date"].sort_values()
+            debut_cie, fin_cie = dates_ville.iloc[0], dates_ville.iloc[min(len(dates_ville), 30) - 1]
         # tous les jours entre les deux dates, même sans comparaison (barres vides)
-        d1 = pd.DataFrame() if j.empty else (j[(j["VilleArrivee"] == ville_1a) & (j["Date"] >= debut_1a) & (j["Date"] <= fin_1a)]
+        d1 = pd.DataFrame() if j.empty else (j[(j["VilleArrivee"] == ville_cie) & (j["Date"] >= debut_cie) & (j["Date"] <= fin_cie)]
               .drop_duplicates("Date").set_index("Date")
-              .reindex(pd.date_range(debut_1a, fin_1a, freq="D")).rename_axis("Date").reset_index())
+              .reindex(pd.date_range(debut_cie, fin_cie, freq="D")).rename_axis("Date").reset_index())
     else:
-        ville_1a, d1 = "", pd.DataFrame()
-    bandeau(ws, "1A — Tarifs Airfox et Google, date par date (jointure sur la compagnie)", 3, 1, 8, BLEU, 13, 26)
-    bandeau(ws, "2A — Airfox face au prix le plus bas de Google, date par date", 3, 10, 17, BLEU, 13, 26)
+        ville_cie, d1 = "", pd.DataFrame()
+    bandeau(ws, "Tarifs Airfox et Google, date par date (jointure sur la compagnie)", 3, 1, 8, BLEU, 13, 26)
+    bandeau(ws, "Airfox face au prix le plus bas de Google, date par date", 3, 10, 17, BLEU, 13, 26)
     ligne_donnees = 35  # données des graphiques, sous les graphiques
     ws.cell(row=33, column=1, value="Tarif Airfox et tarif Google de la même compagnie, à chaque date de "
                                     "départ, tous les jours de la période choisie dans Data Visualisation (sinon la destination la plus "
@@ -177,7 +202,7 @@ def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, ch
     ws.cell(row=33, column=10, value="Tarif Airfox et tarif de la compagnie la moins chère chez Google "
                                      "le même jour. Destination la plus comparée.").font = Font(italic=True,
                                                                                                 color="52514E")
-    ws.cell(row=ligne_donnees, column=1, value=f"Données 1A — {ville_1a}").font = Font(bold=True)
+    ws.cell(row=ligne_donnees, column=1, value=f"Données du graphique — {ville_cie}").font = Font(bold=True)
     for k, titre in enumerate(("Date", "Airfox", "Google", "Compagnie")):
         ws.cell(row=ligne_donnees + 1, column=1 + k, value=titre).font = Font(bold=True)
     for i, r in enumerate(d1.itertuples(), start=ligne_donnees + 2):
@@ -187,12 +212,15 @@ def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, ch
                 ws.cell(row=i, column=k, value=round(float(d1.loc[r.Index, c]), 2)).number_format = '#,##0 "€"'
         if pd.notna(d1.loc[r.Index, "CodeTransporteur"]):
             ws.cell(row=i, column=4, value=d1.loc[r.Index, "CodeTransporteur"])
+    if len(d1):  # tableau Excel stylé comme dans les autres feuilles (en-tête bleu, lignes alternées, filtres)
+        tableau_donnees(ws, 1, 4, ligne_donnees + 1, ligne_donnees + 1 + len(d1), "DonneesGraphiqueCompagnie")
+        airfox_plus_cher(ws, 2, 3, ligne_donnees + 2, ligne_donnees + 1 + len(d1))
     if len(d1):
         barres = BarChart()
         barres.type, barres.style, barres.grouping = "col", 10, "clustered"
-        aeroports = [a for a in ((choix_1a or {}).get("aeroport_depart", "Tous"),
-                                 (choix_1a or {}).get("aeroport_arrivee", "Tous")) if a != "Tous"]
-        barres.title = (f"{depart_1a} → {ville_1a}" + (f" ({' → '.join(aeroports)})" if aeroports else "")
+        aeroports = [a for a in ((choix_graphique or {}).get("aeroport_depart", "Tous"),
+                                 (choix_graphique or {}).get("aeroport_arrivee", "Tous")) if a != "Tous"]
+        barres.title = (f"{depart_cie} → {ville_cie}" + (f" ({' → '.join(aeroports)})" if aeroports else "")
                         + " : tarif Airfox et Google à chaque date")
         barres.x_axis.title = barres.y_axis.title = None  # dates et tarifs se lisent sur les graduations
         fin_donnees = ligne_donnees + 1 + len(d1)
@@ -214,21 +242,24 @@ def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, ch
         quadrillage_clair(barres)
         barres.height, barres.width = 14.5, 17
         ws.add_chart(barres, "A5")
-    # --- 2A : destination la plus comparée
+    # --- Graphique « moins chère » : destination la plus comparée
     jm = jointure_mc.assign(Date=pd.to_datetime(jointure_mc.get("DateAller"), dayfirst=True, errors="coerce"))         if len(jointure_mc) else pd.DataFrame(columns=["VilleArrivee", "Date", "Tarif Airfox", "Tarif Google"])
     if len(jm):
         ville = jm["VilleArrivee"].value_counts().index[0]
         d = jm[jm["VilleArrivee"] == ville].sort_values("Date")
-        ws.cell(row=ligne_donnees, column=10, value=f"Données 2A — {ville}").font = Font(bold=True)
+        ws.cell(row=ligne_donnees, column=10, value=f"Données du graphique — {ville}").font = Font(bold=True)
         for k, titre in enumerate(("Date", "Airfox", "Google (moins chère)", "Compagnie Airfox", "Compagnie Google")):
             ws.cell(row=ligne_donnees + 1, column=10 + k, value=titre).font = Font(bold=True)
         for i, r in enumerate(d.itertuples(), start=ligne_donnees + 2):
-            ws.cell(row=i, column=10, value=r.Date.to_pydatetime()).number_format = "dd/mm/yyyy"
-            ws.cell(row=i, column=11, value=float(pd.to_numeric(d.loc[r.Index, "Tarif Airfox"], errors="coerce")))
-            ws.cell(row=i, column=12, value=float(pd.to_numeric(d.loc[r.Index, "Tarif Google"], errors="coerce")))
+            ws.cell(row=i, column=10, value=r.Date.to_pydatetime()).number_format = "dd/mm"
+            for k, c in ((11, "Tarif Airfox"), (12, "Tarif Google")):
+                ws.cell(row=i, column=k, value=float(pd.to_numeric(d.loc[r.Index, c], errors="coerce"))
+                        ).number_format = '#,##0 "€"'
             ws.cell(row=i, column=13, value=d.loc[r.Index, "CodeTransporteur"])
             ws.cell(row=i, column=14, value=d.loc[r.Index, "CompagnieMoinsChere"])
         fin = ligne_donnees + 1 + len(d)
+        tableau_donnees(ws, 10, 14, ligne_donnees + 1, fin, "DonneesGraphiqueMoinsChere")
+        airfox_plus_cher(ws, 11, 12, ligne_donnees + 2, fin)
         courbes = LineChart()
         courbes.title = f"{ville} : Airfox et prix le plus bas chez Google"
         courbes.y_axis.title = courbes.x_axis.title = None  # dates et tarifs se lisent sur les graduations
@@ -254,7 +285,7 @@ def feuille_graphiques(ws, jointure: pd.DataFrame, jointure_mc: pd.DataFrame, ch
 
 @st.cache_data(show_spinner="Préparation du rapport…")
 def construire_rapport(airfox: pd.DataFrame, google: pd.DataFrame, jointure: pd.DataFrame,
-                       jointure_mc: pd.DataFrame, version: float = 0, choix_1a: dict | None = None,
+                       jointure_mc: pd.DataFrame, version: float = 0, choix_graphique: dict | None = None,
                        couleurs: tuple = ("2A78D6", "111111")) -> bytes:
     """version : date de modification de ce fichier — le cache ne garde que le seul code de cette fonction,
     il resservirait sinon un ancien rapport après un changement des feuilles ou des graphiques."""
@@ -286,7 +317,7 @@ def construire_rapport(airfox: pd.DataFrame, google: pd.DataFrame, jointure: pd.
     grand_titre(moins, "Jointure sur la compagnie la moins chère en comparaison avec Google Flights", debut=3)
     moins.column_dimensions["A"].width = moins.column_dimensions["B"].width = 6
     moins.freeze_panes = "A6"
-    feuille_graphiques(classeur.create_sheet("Visualisation graphique"), jointure, jointure_mc, choix_1a, couleurs)
+    feuille_graphiques(classeur.create_sheet("Visualisation graphique"), jointure, jointure_mc, choix_graphique, couleurs)
     sortie = io.BytesIO()
     classeur.save(sortie)
     return sortie.getvalue()
@@ -303,7 +334,7 @@ st.caption(f"Fichier Airfox : {st.session_state.get('rapport_fichier', '—')} �
            f"{nombre(0 if jointure_mc is None else len(jointure_mc))} sur la compagnie la moins chère.")
 contenu = construire_rapport(airfox, vide if google is None else google, vide if jointure is None else jointure,
                              vide if jointure_mc is None else jointure_mc, version=Path(__file__).stat().st_mtime,
-                             choix_1a=st.session_state.get("rapport_1a"),
+                             choix_graphique=st.session_state.get("rapport_graphique"),
                              couleurs=tuple(couleurs_graphiques()[k].lstrip("#").upper() for k in ("Airfox", "Google")))
 st.download_button("Télécharger", contenu, type="primary",
                    file_name=f"Rapport Airfox vs Google Flights {datetime.now():%Y-%m-%d %Hh%M}.xlsx",

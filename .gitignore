@@ -8,6 +8,9 @@ __pycache__/
 
 # Journaux (régénérés par l'application)
 *.log
+# Fichiers de travail de SQLite en mode WAL (le contenu est reporté dans vols.db)
+vols.db-wal
+vols.db-shm
 # vols.db (prix collectés) est versionné : la version en ligne (Streamlit Cloud) n'a pas d'autre source de données
 
 # Routines et réglages d'alerte (adresse e-mail personnelle) : propres à ce PC

@@ -42,8 +42,11 @@ st.markdown("<style>[data-testid='stSidebar'] {background: #faf6ec;}"  # fond «
     "[data-testid='stSidebarNav'] a[aria-current='page'] {padding-top: .6rem; padding-bottom: .6rem;"
     " position: relative; z-index: 2; border: 3px solid #111 !important;"
     " box-shadow: inset 0 3px 0 rgba(255,255,255,.6), -3px 5px 0 #111 !important; margin: .5rem 0 .9rem 3px;}"
-    "[data-testid='stSidebarNav'] a[aria-current='page'] p {font-weight: 800; font-size: 1.02rem;"
-    " letter-spacing: .03em;}"
+    "[data-testid='stSidebarNav'] a[aria-current='page'] p {font-weight: 800; font-size: .95rem; line-height: 1.2;"
+    " white-space: normal;}"
+    # nom trop long pour une ligne (Montserrat est large) : sur deux lignes plutôt que coupé par « … »
+    "[data-testid='stSidebarNav'] a[aria-current='page'] span {overflow: visible; text-overflow: clip;"
+    " white-space: normal;}"
     "[data-testid='stSidebarNav'] a[aria-current='page'] > span:first-child {width: auto; margin-right: .6rem;}"
     "[data-testid='stSidebarNav'] a[aria-current='page'] [data-testid='stIconEmoji'] {font-size: 1.4rem;"
     " line-height: 1; filter: drop-shadow(0 2px 2px rgba(0,0,0,.35));}"

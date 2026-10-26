@@ -1,0 +1,7 @@
+# Réglages Streamlit de l'application (lus au démarrage du serveur)
+
+[theme]
+# Police Montserrat (Google Fonts) pour tout le texte : pages, titres, boutons, tableaux et graphiques.
+# Sans connexion Internet, une police sans empattement standard la remplace.
+font = "Montserrat:https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap, sans-serif"
+headingFont = "Montserrat:https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap, sans-serif"

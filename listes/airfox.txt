@@ -1,6 +1,5 @@
 # Destinations de la donnée chargée (fichier Airfox), les plus fréquentes d'abord
 # Format : CODE;Ville
-ZNZ;Kiembi Samaki
 ACE;Lanzarote
 AGA;Agadir
 AMM;Amman
@@ -34,7 +33,6 @@ FDF;Fort-de-France
 FEZ;Fès
 FLR;Firenze
 FNC;Funchal
-FUE;Fuerteventura
 GRX;Grenade
 HAN;Hanoi
 HKT;Phuket
@@ -107,26 +105,27 @@ VIE;Vienna
 YUL;Dorval
 YYZ;Mississauga
 YTZ;Toronto
+ZNZ;Kiembi Samaki
+FUE;Fuerteventura
 USM;Koh Samui
+VIL;Dakhla
 DUB;Dublin
 SID;Sal
-VIL;Dakhla
 VXE;Mindelo (São Vicente)
 ERH;Errachidia
-SXM;Saint Martin
 PEN;Penang
 PUJ;Punta Cana
 VAR;Varna
 RUH;Riyadh
 LXR;Luxor
-CAG;Cagliari
 MBJ;Montego Bay
-KBV;Krabi
+CAG;Cagliari
 SLL;Salalah
+KBV;Krabi
 PMO;Palermo
 PMI;Palma de Majorque
-NAP;Napoli
 RAI;Praia
+NAP;Napoli
 ESU;Essaouira
 CTA;Catania
 DBV;Dubrovnik
@@ -138,8 +137,10 @@ BIA;Bastia
 CFU;Corfou
 CHQ;La Canée (Crète)
 CLY;Calvi
+FSC;Figari
 HER;Héraklion (Crète)
 IBZ;Ibiza
+ADB;Izmir
 JTR;Santorin
 KGS;Kos
 LCA;Larnaca
@@ -151,8 +152,6 @@ SPU;Split
 TIA;Tirana
 TIV;Tivat
 VLC;Valence
-FSC;Figari
-ADB;Izmir
 BJV;Bodrum
 TPE;Taipei
 LAX;Los Angeles
@@ -160,41 +159,36 @@ NAS;Nassau
 OZZ;Ouarzazate
 OLB;Olbia
 JMK;Mykonos
-SIN;Singapore
 PAS;Paros
-BVC;Boa Vista
 RVN;Rovaniemi
-ZTH;Zante
+BVC;Boa Vista
 LLA;Lulea
+ZTH;Zante
 SLU;Castries
 POP;Puerto Plata
 EDI;Edinburgh
 KTT;Kittila
-SPX;Giza
 TOS;Tromsø
 YQB;Quebec City
+SPX;Giza
 PXO;Porto Santo
+PFO;Paphos
 BDS;Brindisi
 INN;Innsbruck
-PFO;Paphos
-MSY;New Orleans
 PUY;Pula
+MSY;New Orleans
 CPH;Copenhagen
 EZE;Ezeiza
 MNL;Manila
+TGD;Podgorica
 ORK;Cork
 TOE;Tozeur
 RMF;Marsa Alam
 LIR;Liberia
-BSZ;Bishkek
-SOF;Sofia
-TGD;Podgorica
+BOJ;Burgas
 AZS;Samaná
 DLM;Dalaman
+SOF;Sofia
 BLQ;Bologna
-SUF;Lamezia Terme
 MJT;Mytilène (Lesbos)
 SXB;Strasbourg
-BJL;Banjul
-KLX;Kalamata
-RIX;Riga

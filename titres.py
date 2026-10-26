@@ -24,6 +24,12 @@ FONDS = {"donnee": "#ecfaf6", "catalogue": "#f0f6fd", "recherche": "#f6f3fd", "p
          "comparatif": "#fff8ec", "dataviz": "#fef4fa", "rapport": "#eff9f3", "assistant": "#fdf3f5"}
 
 
+def aplat(couleur: str, part: float = 0.28) -> str:
+    """Teinte pâle d'une couleur (mélange avec du blanc) : fond des sections, plus soutenu que celui de la page."""
+    r, g, b = (int(couleur[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % tuple(round(255 - (255 - c) * part) for c in (r, g, b))
+
+
 def titre_page(texte: str, theme: str):
     """Grand titre centré, dans un cadre de la même forme que les boutons de la barre latérale : rectangle aux coins
     arrondis bordé de la couleur foncée du thème, fond dégradé du thème."""
@@ -35,11 +41,25 @@ def titre_page(texte: str, theme: str):
         "[data-testid='stSelectbox'] [role='group']", "[data-testid='stMultiSelect'] [role='group']",
         "[data-testid='stDateInputField']", "[data-testid='stNumberInputContainer']",
         "[data-testid='stTextInputRootElement']", "[data-testid='stTextAreaRootElement']",
-        "[data-testid='stDataFrameResizable']"))  # tableaux (consultation et modifiables)
+        "[data-testid='stDataFrameResizable']",  # tableaux (consultation et modifiables)
+        "[data-testid='stFileUploaderDropzone']"))  # zone de dépôt de fichier (« Charger la donnée »)
     st.markdown("<style>.block-container, [data-testid='stMainBlockContainer'] {padding-top: 3.2rem;}"
                 + (f"[data-testid='stMain'], [data-testid='stHeader'] {{background: {FONDS[theme]};}}"
                    if theme in FONDS else "")
-                + f"{champs} {{border: 2px solid {fonce} !important;}}"
+                + f"{champs} {{border: 2px solid {fonce} !important; background-color: #fff !important;}}"
+                # zones de saisie à l'intérieur des champs : transparentes, pour laisser voir le fond blanc
+                + ", ".join(f"[data-testid='stMain'] {c} {e}" for c in (
+                    "[data-testid='stDateInputField']", "[data-testid='stNumberInputContainer']",
+                    "[data-testid='stTextInputRootElement']", "[data-testid='stTextAreaRootElement']")
+                            for e in ("input", "textarea", "div"))
+                + " {background-color: transparent !important;}"
+                # sections encadrées (suivi, fichier chargé…), sections repliables et formulaires : sans contour, un
+                # aplat de la couleur du thème un peu plus soutenu que le fond de la page
+                + f"[data-testid='stMain'] [class*='st-key-cadre_'], [data-testid='stMain'] [data-testid='stExpander'] details,"
+                  f" [data-testid='stMain'] [data-testid='stForm'] {{border: none !important;"
+                  f" background: {aplat(clair)} !important; border-radius: .6rem;}}"
+                # barre de progression : partie remplie dans la couleur foncée du thème
+                + f"[data-testid='stProgressBarTrack'] > div {{background-color: {fonce} !important;}}"
                 # graphiques : même contour, tracé autour (sans réduire la place du graphique)
                 + f"[data-testid='stMain'] [data-testid='stVegaLiteChart'] {{outline: 2px solid {fonce};"
                   " outline-offset: 6px; border-radius: .5rem; margin: 8px 0; background: #fff;"
@@ -52,6 +72,17 @@ def titre_page(texte: str, theme: str):
                   "[data-testid='stSidebarCollapseButton'] button {transform: scale(1.35); transform-origin: center;}"
                 + f"[data-testid='stSidebarCollapseButton'] button, [data-testid='stSidebarCollapseButton'] span"
                   f" {{color: {fonce} !important;}}"
+                # boutons en aplats, sans contour, tous dans la couleur foncée du thème (texte blanc, au lieu du rouge
+                # et du blanc de Streamlit) ; étiquettes des choix multiples assorties.
+                # :where() : priorité minimale, les boutons habillés à part (bouton_theme) gardent leur style
+                + f":where([data-testid='stMain'] button[data-testid^='stBaseButton-secondary']),"
+                  f" :where([data-testid='stMain'] button[data-testid^='stBaseButton-primary'])"
+                  f" {{background: {fonce} !important; border: none !important; color: #fff !important;}}"
+                  ":where([data-testid='stMain'] button[data-testid^='stBaseButton-secondary']):hover:not(:disabled),"
+                  " :where([data-testid='stMain'] button[data-testid^='stBaseButton-primary']):hover:not(:disabled)"
+                  " {filter: brightness(1.15);}"
+                  ":where([data-testid='stMain'] button[data-testid^='stBaseButton-']):disabled {opacity: .5;}"
+                  f"[data-testid='stMain'] [data-tag] {{background-color: {fonce} !important;}}"
                 + "</style>", unsafe_allow_html=True)
     st.markdown(f"""
 <div style="display:flex; justify-content:center; margin:0 0 2.4rem 0;">
@@ -80,9 +111,10 @@ def bouton_theme(cle: str, theme: str):
     """Habille le bouton de clé `cle` aux couleurs du titre de la page (dégradé du thème, bordure foncée comme le titre)."""
     clair, fonce = COULEURS[theme]
     st.markdown(f"""<style>
-.st-key-{cle} button {{background: radial-gradient(circle, {clair} 0%, {fonce} 100%); color: #fff;
-    border: 2px solid {fonce}; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.4);}}
-.st-key-{cle} button:hover {{color: #fff; border-color: {fonce}; filter: brightness(1.08);}}
+.st-key-{cle} button {{background: radial-gradient(circle, {clair} 0%, {fonce} 100%) !important;
+    color: #fff !important; border: 2px solid {fonce} !important; font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0,0,0,.4);}}
+.st-key-{cle} button:hover {{color: #fff !important; border-color: {fonce} !important; filter: brightness(1.08);}}
 .st-key-{cle} button p {{font-size: 1.02rem;}}
 </style>""", unsafe_allow_html=True)
 
@@ -91,7 +123,7 @@ def liste_theme(cle: str, theme: str):
     """Habille la liste déroulante de clé `cle` aux couleurs du titre de la page."""
     clair, fonce = COULEURS[theme]
     st.markdown(f"""<style>
-.st-key-{cle} [role="group"] {{background: radial-gradient(circle, {clair} 0%, {fonce} 100%);
+.st-key-{cle} [role="group"] {{background: radial-gradient(circle, {clair} 0%, {fonce} 100%) !important;
     border: 2px solid {fonce}; border-radius: .5rem;}}
 .st-key-{cle} [role="group"] input {{color: #fff; -webkit-text-fill-color: #fff; font-weight: 700;
     background: transparent;}}

@@ -10,7 +10,7 @@ from titres import titre_page
 titre_page("Charger la donnée", "donnee")
 st.caption("Chargez le fichier Airfox : ses destinations deviennent celles du catalogue.")
 
-CLES_RAPPORT = ("rapport_airfox", "rapport_google", "rapport_jointure", "rapport_jointure_moins_chere", "rapport_1a")
+CLES_RAPPORT = ("rapport_airfox", "rapport_google", "rapport_jointure", "rapport_jointure_moins_chere", "rapport_graphique")
 
 # La donnée chargée est gardée (sur le disque) : elle reste là, même en changeant de page ou en relançant
 # l'application, jusqu'à ce qu'on clique sur la croix du fichier.
@@ -28,7 +28,7 @@ if gardee is None:
         st.rerun()
 else:
     # le fichier gardé, comme le champ de chargement l'afficherait, avec sa croix pour le retirer
-    with st.container(border=True):
+    with st.container(border=True, key="cadre_fichier"):  # cadre aux couleurs de la page (titres.py)
         c_nom, c_croix = st.columns([12, 1], vertical_alignment="center")
         c_nom.markdown(f"📄 **{gardee[1]}** · {gardee[2] / 1e6:.1f} MB")
         if c_croix.button("✖", key="retirer_donnee", help="Retirer la donnée (les pages Comparatif, Data "

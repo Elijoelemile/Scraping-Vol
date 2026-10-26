@@ -1,8 +1,8 @@
 """Page « Data Visualisation » : graphiques des deux jointures de la page Comparatif.
 
-1A — jointure sur la compagnie : haltères tarif Airfox / tarif Google de la même compagnie à chaque date
+Graphique « même compagnie » (jointure sur la compagnie) : haltères tarif Airfox / tarif Google de la même compagnie à chaque date
      (trait rouge : Airfox plus cher, vert : moins cher ; symbole plein : bagage inclus), une destination à la fois.
-2A — jointure sur la compagnie la moins chère : tarif Airfox et tarif le plus bas chez Google, date par date.
+Graphique « moins chère » (jointure sur la compagnie la moins chère) : tarif Airfox et tarif le plus bas chez Google, date par date.
 Les jointures (fichiers complets, sans filtres) sont calculées par la page Comparatif et gardées en session.
 """
 import altair as alt
@@ -108,8 +108,8 @@ BLEU, NOIR = COUL["Airfox"], COUL["Google"]  # séries Airfox / Google
 bagage_seul = st.toggle("Même bagage seulement", help="Ne garder que les comparaisons où Airfox et Google ont le même "
                                                       "bagage (sinon on compare des offres différentes)")
 
-# --- 1A : haltères — tarif Airfox et Google de la même compagnie à chaque date, et leur bagage -------------------
-st.subheader("1A — Airfox face à Google, même compagnie, date par date (jointure sur la compagnie)")
+# --- Graphique « même compagnie » : haltères — tarif Airfox et Google de la même compagnie à chaque date, et leur bagage -------------------
+st.subheader("Airfox face à Google, même compagnie, date par date (jointure sur la compagnie)")
 j1 = preparer(jointure, bagage_seul)
 if j1.empty:
     chiffres_cles(j1)
@@ -122,34 +122,34 @@ else:
     # une destination à la fois : une date regroupe sinon des destinations aux prix sans rapport
     # Ville (codes Airfox : PAR, LON…) et aéroport (celui du tarif Google : CDG, ORY…) de départ et d'arrivée
     f0, f1, f3, f4 = st.columns(4)
-    departs_1a = j1["VilleDepart"].astype(str).value_counts()
-    depart_1a = f0.selectbox("Ville de départ", departs_1a.index, key="depart_1a",
+    departs_cie = j1["VilleDepart"].astype(str).value_counts()
+    depart_cie = f0.selectbox("Ville de départ", departs_cie.index, key="depart_cie",
                              format_func=lambda v: f"{nom_ville(v)} ({v})")
-    j1 = j1[j1["VilleDepart"].astype(str) == depart_1a]
-    aeroport_dep_1a = f1.selectbox("Aéroport de départ", ["Tous"] + sorted(j1["AeroportDepart"].dropna().unique()),
-                                   key="aeroport_depart_1a")
-    if aeroport_dep_1a != "Tous":
-        j1 = j1[j1["AeroportDepart"] == aeroport_dep_1a]
-    villes_1a = j1["VilleArrivee"].value_counts()
-    if villes_1a.empty:
+    j1 = j1[j1["VilleDepart"].astype(str) == depart_cie]
+    aeroport_dep_cie = f1.selectbox("Aéroport de départ", ["Tous"] + sorted(j1["AeroportDepart"].dropna().unique()),
+                                   key="aeroport_depart_cie")
+    if aeroport_dep_cie != "Tous":
+        j1 = j1[j1["AeroportDepart"] == aeroport_dep_cie]
+    villes_cie = j1["VilleArrivee"].value_counts()
+    if villes_cie.empty:
         st.info("Aucune comparaison au départ de cet aéroport.")
         st.stop()
-    ville_1a = f3.selectbox("Destination", villes_1a.index, key="destination_1a",
-                            format_func=lambda v: f"{nom_ville(v)} ({v}) — {villes_1a[v]} comparaison(s)")
-    j1 = j1[j1["VilleArrivee"] == ville_1a]
-    aeroport_arr_1a = f4.selectbox("Aéroport d'arrivée", ["Tous"] + sorted(j1["AeroportArrivee"].dropna().unique()),
-                                   key="aeroport_arrivee_1a")
-    if aeroport_arr_1a != "Tous":
-        j1 = j1[j1["AeroportArrivee"] == aeroport_arr_1a]
+    ville_cie = f3.selectbox("Destination", villes_cie.index, key="destination_cie",
+                            format_func=lambda v: f"{nom_ville(v)} ({v}) — {villes_cie[v]} comparaison(s)")
+    j1 = j1[j1["VilleArrivee"] == ville_cie]
+    aeroport_arr_cie = f4.selectbox("Aéroport d'arrivée", ["Tous"] + sorted(j1["AeroportArrivee"].dropna().unique()),
+                                   key="aeroport_arrivee_cie")
+    if aeroport_arr_cie != "Tous":
+        j1 = j1[j1["AeroportArrivee"] == aeroport_arr_cie]
     # Compagnie (par défaut : celle qui a le plus de comparaisons), combinaison de bagages et période
     g1, g2, g3 = st.columns([2, 2, 3])
-    cies_1a = j1["CodeTransporteur"].astype(str).value_counts()
-    cie_1a = g1.selectbox("Compagnie", ["Toutes"] + list(cies_1a.index), index=1 if len(cies_1a) else 0,
-                          key="compagnie_1a",
-                          format_func=lambda c: c if c == "Toutes" else f"{c} — {cies_1a[c]} comparaison(s)",
+    cies_comptees = j1["CodeTransporteur"].astype(str).value_counts()
+    cie_choisie = g1.selectbox("Compagnie", ["Toutes"] + list(cies_comptees.index), index=1 if len(cies_comptees) else 0,
+                          key="compagnie_cie",
+                          format_func=lambda c: c if c == "Toutes" else f"{c} — {cies_comptees[c]} comparaison(s)",
                           help="« Toutes » : une haltère par compagnie à chaque date, côte à côte")
-    if cie_1a != "Toutes":
-        j1 = j1[j1["CodeTransporteur"].astype(str) == cie_1a]
+    if cie_choisie != "Toutes":
+        j1 = j1[j1["CodeTransporteur"].astype(str) == cie_choisie]
     SITUATIONS = {("TRUE", "TRUE"): "Bagage des deux côtés", ("FALSE", "FALSE"): "Sans bagage des deux côtés",
                   ("TRUE", "FALSE"): "Bagage chez Airfox seulement", ("FALSE", "TRUE"): "Bagage chez Google seulement"}
     COMBINAISONS = {"Toutes": lambda a, g: a == a,
@@ -158,22 +158,22 @@ else:
                     "Bagage chez Airfox seulement": lambda a, g: (a == "TRUE") & (g == "FALSE"),
                     "Bagage chez Google seulement": lambda a, g: (a == "FALSE") & (g == "TRUE"),
                     "Sans bagage des deux côtés": lambda a, g: (a == "FALSE") & (g == "FALSE")}
-    combinaison = g2.selectbox("Bagages", list(COMBINAISONS), key="bagages_1a")
+    combinaison = g2.selectbox("Bagages", list(COMBINAISONS), key="bagages_cie")
     j1 = j1[COMBINAISONS[combinaison](j1["Bagage Airfox"], j1["Bagage Google"])]
     d1 = j1.sort_values("Date")
     if d1.empty:
         st.info("Aucune comparaison pour ces filtres.")
         st.stop()
-    dates_1a = sorted(d1["Date"].dt.normalize().unique())
-    debut_min, fin_max = pd.Timestamp(dates_1a[0]).date(), pd.Timestamp(dates_1a[-1]).date()
-    defaut_fin = pd.Timestamp(dates_1a[min(len(dates_1a), 30) - 1]).date()  # par défaut : les 30 premières dates
+    dates_cie = sorted(d1["Date"].dt.normalize().unique())
+    debut_min, fin_max = pd.Timestamp(dates_cie[0]).date(), pd.Timestamp(dates_cie[-1]).date()
+    defaut_fin = pd.Timestamp(dates_cie[min(len(dates_cie), 30) - 1]).date()  # par défaut : les 30 premières dates
     periode = g3.date_input("Période", value=(debut_min, defaut_fin), min_value=debut_min, max_value=fin_max,
-                            format="DD/MM/YYYY", key="periode_1a")
-    debut_1a, fin_1a = (periode[0], periode[1]) if len(periode) == 2 else (debut_min, defaut_fin)
-    d1 = d1[(d1["Date"].dt.date >= debut_1a) & (d1["Date"].dt.date <= fin_1a)]
+                            format="DD/MM/YYYY", key="periode_cie")
+    debut_cie, fin_cie = (periode[0], periode[1]) if len(periode) == 2 else (debut_min, defaut_fin)
+    d1 = d1[(d1["Date"].dt.date >= debut_cie) & (d1["Date"].dt.date <= fin_cie)]
     # repris par le rapport Excel (même destination, même période)
-    st.session_state["rapport_1a"] = {"depart": depart_1a, "ville": ville_1a, "debut": debut_1a, "fin": fin_1a,
-                                      "aeroport_depart": aeroport_dep_1a, "aeroport_arrivee": aeroport_arr_1a}
+    st.session_state["rapport_graphique"] = {"depart": depart_cie, "ville": ville_cie, "debut": debut_cie, "fin": fin_cie,
+                                      "aeroport_depart": aeroport_dep_cie, "aeroport_arrivee": aeroport_arr_cie}
 
     # Pour fixer les tarifs : par situation de bagage, combien de dates où Airfox est au-dessus de Google et de
     # combien il faut baisser (baisse nécessaire = Airfox − Google quand Airfox est plus cher, sinon 0)
@@ -200,7 +200,7 @@ else:
                "même jour. Quand Airfox inclut le bagage et pas Google, être plus cher peut se justifier : comparez "
                "la baisse au prix du bagage chez la compagnie.")
 
-    jours = pd.date_range(debut_1a, fin_1a, freq="D")  # tous les jours entre les deux dates, même sans comparaison
+    jours = pd.date_range(debut_cie, fin_cie, freq="D")  # tous les jours entre les deux dates, même sans comparaison
     ordre_jours = [j.strftime("%d/%m") for j in jours]
     d1 = d1.assign(Jour=d1["Date"].dt.strftime("%d/%m"),
                    Sens=d1[ECART].map(lambda e: "Airfox plus cher" if e > 0 else
@@ -244,12 +244,12 @@ else:
                            alt.value("#ffffff")),
         tooltip=infos)
     graphique = traits + points
-    legende("1a", [("Airfox", "Airfox"), ("Google", "Google"), ("Airfox plus cher", "Airfox plus cher"),
+    legende("compagnie", [("Airfox", "Airfox"), ("Google", "Google"), ("Airfox plus cher", "Airfox plus cher"),
                    ("Airfox moins cher", "Airfox moins cher"), ("Même prix", "Même prix")])
     st.altair_chart(graphique.properties(height=400).resolve_scale(color="independent"), width="stretch")
-    trajet = (f"{nom_ville(depart_1a)}{'' if aeroport_dep_1a == 'Tous' else ' (' + aeroport_dep_1a + ')'} → "
-              f"{nom_ville(ville_1a)}{'' if aeroport_arr_1a == 'Tous' else ' (' + aeroport_arr_1a + ')'}")
-    st.caption(f"{trajet}{'' if cie_1a == 'Toutes' else ' · ' + cie_1a} : pour chaque date, ● tarif Airfox et "
+    trajet = (f"{nom_ville(depart_cie)}{'' if aeroport_dep_cie == 'Tous' else ' (' + aeroport_dep_cie + ')'} → "
+              f"{nom_ville(ville_cie)}{'' if aeroport_arr_cie == 'Tous' else ' (' + aeroport_arr_cie + ')'}")
+    st.caption(f"{trajet}{'' if cie_choisie == 'Toutes' else ' · ' + cie_choisie} : pour chaque date, ● tarif Airfox et "
                "◆ tarif Google de la même compagnie, reliés par un trait **rouge** si Airfox est plus cher, **vert** "
                "s'il est moins cher. Symbole **plein** = bagage inclus, **creux** = sans bagage. Survolez pour le "
                f"détail. {d1['Date'].dt.normalize().nunique()} date(s) comparée(s) sur {len(jours)} jour(s) : une date "
@@ -257,7 +257,7 @@ else:
     # La liste d'actions, modifiable : toutes les dates comparées, avec la baisse (Airfox plus cher) ou l'augmentation
     # (Airfox moins cher) pour atteindre le tarif cible ; tarifs corrigeables (recalcul), lignes supprimables ; elle
     # repart des données quand un filtre change. Téléchargeable en CSV.
-    signature = (depart_1a, aeroport_dep_1a, ville_1a, aeroport_arr_1a, cie_1a, combinaison, debut_1a, fin_1a, nuits)
+    signature = (depart_cie, aeroport_dep_cie, ville_cie, aeroport_arr_cie, cie_choisie, combinaison, debut_cie, fin_cie, nuits)
     if (st.session_state.get("baisse_signature") != signature or "baisse_table" not in st.session_state
             or "Augmentation nécessaire" not in st.session_state["baisse_table"]):
         st.session_state["baisse_table"] = d1.sort_values("Date").assign(
@@ -362,8 +362,8 @@ else:
                 st.toast(f"{n} actions enregistrées avec leur contexte")
 
     # Décisions sur les actions enregistrées pour cette destination : baissé, gardé, autre + tarif retenu
-    enregistrees = actions.lire(ville_1a)
-    with st.expander(f"📝 Mes décisions — actions enregistrées pour {nom_ville(ville_1a)} ({len(enregistrees)})"):
+    enregistrees = actions.lire(ville_cie)
+    with st.expander(f"📝 Mes décisions — actions enregistrées pour {nom_ville(ville_cie)} ({len(enregistrees)})"):
         if enregistrees.empty:
             st.caption("Aucune action enregistrée pour cette destination : cliquez sur « Enregistrer ces actions ».")
         else:
@@ -403,8 +403,8 @@ else:
                 st.toast(f"{len(changees)} décision(s) enregistrée(s)")
                 st.rerun()
 
-# --- 2A : tarif Airfox contre tarif le plus bas chez Google, date par date -----------------------------------------
-st.subheader("2A — Airfox face au prix le plus bas de Google, date par date (jointure sur la moins chère)")
+# --- Graphique « moins chère » : tarif Airfox contre tarif le plus bas chez Google, date par date -----------------------------------------
+st.subheader("Airfox face au prix le plus bas de Google, date par date (jointure sur la moins chère)")
 j2 = preparer(jointure_mc, bagage_seul)
 chiffres_cles(j2)
 if j2.empty:
@@ -439,7 +439,7 @@ else:
     repere = alt.Chart(longue).mark_rule(color=ENCRE_DOUCE, strokeDash=[3, 3]).encode(x="Date:T").transform_filter(
         survol)
     cible = alt.Chart(longue).mark_point(size=400, opacity=0).encode(x="Date:T", y="Tarif:Q").add_params(survol)
-    legende("2a", [("Airfox", "Airfox"), ("Google", "Google (moins chère)")])
+    legende("moins_chere", [("Airfox", "Airfox"), ("Google", "Google (moins chère)")])
     st.altair_chart((lignes + points + repere + cible).properties(height=360), width="stretch")
     st.caption("Tarif Airfox et tarif de la compagnie la moins chère chez Google le même jour (couleurs de la "
                "légende). "
