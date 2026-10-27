@@ -297,7 +297,9 @@ a_actualiser = sorted({(d, j) for d, j in zip(dates["destination"], dates["date"
                       key=lambda x: (x[1], x[0]))  # date par date : les premiers jours sont prêts d'abord
 # Déjà recherchées pour ce nombre de nuits (avec ou sans vol) : « Compléter » ne fait que les manquantes. Une recherche
 # « Paris » couvre les 4 aéroports parisiens : elle compte pour chacun. Heure de la recherche par destination et date.
-heures_recherche = (catalogue.vols_jour_tableau(sorted(set(departs) | set(catalogue.PARIS_AEROPORTS)), nuits_ar)
+# (sans celles masquées par « Rafraîchir la table » : elles sont à refaire)
+heures_recherche = (catalogue.vols_jour_tableau(sorted(set(departs) | set(catalogue.PARIS_AEROPORTS)), nuits_ar,
+                                                catalogue=True)
                     .groupby(["destination", "date"])["collecte_le"].max())
 deja = set(heures_recherche.index)
 manquantes = [p for p in a_actualiser if p not in deja]
@@ -325,32 +327,44 @@ aide = (f"Interroge Google Flights ({catalogue.texte_rythme()}) pour chaque dest
         f"seules au bout de {catalogue.PAUSE_BLOCAGE_MIN} min, à un rythme plus lent (le rythme accélère ensuite "
         "doucement tant que Google ne bloque pas).")
 actif = catalogue.actualisation_active()
+# Table rafraîchie (enregistrée dans l'historique) et rien recherché depuis : un seul bouton « Actualiser », sans tableau
+videe = (bool(a_actualiser) and len(manquantes) == len(a_actualiser)
+         and set(a_actualiser) <= catalogue.paires_videes(nuits_ar))
 b1, b2, b3 = st.columns(3)
-if manquantes and b1.button(f"🔄 Compléter ({len(manquantes)} recherches, {duree_texte(len(manquantes))})",
+if videe:
+    if b1.button(f"🔄 Actualiser ({len(a_actualiser)} recherches, {duree_texte(len(a_actualiser))})",
+                 disabled=actif, type="primary", width="stretch",
+                 help="Une actualisation est déjà en cours." if actif else
+                 "Recherche de nouveau toutes les dates de la table rafraîchie, pour avoir les prix du moment. " + aide):
+        lancer(a_actualiser)
+elif manquantes and b1.button(f"🔄 Compléter ({len(manquantes)} recherches, {duree_texte(len(manquantes))})",
                             disabled=actif, type="primary", width="stretch",
                             help="Une actualisation est déjà en cours." if actif else
                             "Seulement les destinations et dates pas encore recherchées. " + aide):
     lancer(manquantes)
-if b2.button(f"Tout réactualiser ({len(a_actualiser)} recherches, {duree_texte(len(a_actualiser))})",
-             disabled=actif or not a_actualiser, width="stretch",
+if not videe and b2.button(f"Tout réactualiser ({len(a_actualiser)} recherches, {duree_texte(len(a_actualiser))})",
+                           disabled=actif or not a_actualiser, width="stretch",
              help="Une actualisation est déjà en cours." if actif else
              "Refait toutes les recherches des dates choisies, même celles déjà faites, pour avoir les prix du "
              "moment. " + aide):
     lancer(a_actualiser)
-# Toute l'année d'un coup (sans date choisie) : calendrier aller-retour « Paris » de chaque destination, puis celui
-# de ses compagnies les moins chères → prix, compagnie et bagage de chaque date (sans les heures, en ~40 min)
+# Calendrier aller-retour « Paris » de chaque destination, puis celui de ses compagnies les moins chères → prix,
+# compagnie et bagage de chaque date (sans les heures) : toute l'année, ou seulement les dates de départ choisies
 dests_annee = sorted({d for d, _ in a_actualiser})
-if (not jours_depart and dests_annee and set(departs) <= set(catalogue.PARIS_AEROPORTS)
+periode_annee = {"debut": premier, "fin": dernier} if jours_depart else {}
+if (dests_annee and set(departs) <= set(catalogue.PARIS_AEROPORTS)
         and b3.button(f"📅 Prix de l'année seulement ({len(dests_annee)} destinations, "
-                      f"~{catalogue.duree_annee(len(dests_annee))} min)", disabled=actif, width="stretch",
-                      help="Plus rapide, sans les heures : pour chaque destination, le tarif aller-retour le plus bas "
-                           "de chaque date jusqu'à la fin du calendrier Google, la compagnie qui le propose et son "
-                           "bagage en soute. Ne touchez pas à la page pendant la recherche.")):
+                      f"~{catalogue.duree_annee(len(dests_annee), len(jours) if jours_depart else None)} min)",
+                      disabled=actif, width="stretch",
+                      help="Lit le calendrier de Google : le tarif aller-retour le plus bas de chaque date (les dates "
+                           "choisies, sinon jusqu'à la fin du calendrier). Le tableau ne l'affiche que s'il est le "
+                           "même que la recherche du jour (🟢🔵) ; sans recherche du jour, la date reste « à "
+                           "compléter ». Ne touchez pas à la page pendant la recherche.")):
     with st.status("Calendriers aller-retour de l'année sur Google Flights…", expanded=True) as statut:
         barre = st.progress(0.0)
         try:
             n = asyncio.run(catalogue.actualiser_annee(
-                dests_annee, nuits_ar,
+                dests_annee, nuits_ar, **periode_annee,
                 on_progress=lambda i, total, msg: barre.progress(i / total, text=f"{i}/{total} : {msg}")))
             statut.update(label=f"Année actualisée : {n}/{len(dests_annee)} destinations avec prix", state="complete")
         except catalogue.Bloque:
@@ -360,10 +374,16 @@ if (not jours_depart and dests_annee and set(departs) <= set(catalogue.PARIS_AER
     st.rerun()
 if actif:
     st.caption("⏳ Une actualisation tourne en arrière-plan : son avancement s'affiche en haut de la page.")
+if st.session_state.pop("table_rafraichie", None):
+    st.success("Table enregistrée dans « Historique tables rafraîchies » et vidée.")
+if videe:  # la table d'avant est dans l'historique : pas de tableau tant que rien n'a été recherché de nouveau
+    st.info("Table vide : cliquez sur « 🔄 Actualiser » pour la remplir avec les prix du moment. L'ancienne table est "
+            "dans la page « Historique tables rafraîchies ».")
+    st.stop()
 
-# --- Résultats : recherches d'une date (avec heures) et calendriers de l'année ------------------------------------
+# --- Résultats : recherches d'une date (avec heures) ; le calendrier de l'année ne sert qu'à confirmer leur prix ---
 if cies:
-    vj = catalogue.vols_jour_tableau(departs, nuits_ar, annee=True)  # recherches d'une date + toute l'année
+    vj = catalogue.vols_jour_tableau(departs, nuits_ar, catalogue=True)  # recherches d'une date
     dates = dates.merge(vj[vj["origine"] != "-"].sort_values("prix")
                         .drop_duplicates(["origine", "destination", "date", "compagnie"])
                         [["origine", "destination", "date", "compagnie", "prix", "bagage"]]
@@ -373,7 +393,7 @@ if cies:
     dates["collecte_compagnie"] = [(d, j) in deja for d, j in zip(dates["destination"], dates["date"])]
     if avec_vol:
         dates = dates[dates["prix_compagnie"].notna() | ~dates["collecte_compagnie"]]
-du_jour = catalogue.moins_cher_du_jour(departs, nuits_ar).rename(
+du_jour = catalogue.moins_cher_du_jour(departs, nuits_ar, catalogue=True, annee=False).rename(
     columns={"heure_depart": "heure_depart_mc", "heure_arrivee": "heure_arrivee_mc", "duree": "duree_mc"})
 dates = (dates.merge(du_jour, how="left", on=["origine", "destination", "date"])
          .sort_values(["date", "ville_arrivee", "origine"] + (["code_compagnie"] if cies else []), ignore_index=True))
@@ -382,6 +402,12 @@ recherche = dates["prix_moins_cher"].notna()
 sans_resultat = pd.Series([(d, j) in deja and not ok for d, j, ok in zip(dates["destination"], dates["date"],
                                                                         recherche)], index=dates.index)
 bagage_mc = pd.to_numeric(dates["bagage_moins_cher"], errors="coerce")
+# Prix de l'année affiché seulement s'il est le même que celui de la recherche du jour : la ligne est alors marquée
+# « = calendrier de l'année ». Sans recherche du jour : « à compléter ».
+prix_annee = catalogue.prix_annee_min(nuits_ar, catalogue=True)
+annee_ligne = pd.Series([prix_annee.get((d, j)) for d, j in zip(dates["destination"], dates["date"])],
+                        index=dates.index, dtype=float)
+confirme = recherche & ((annee_ligne - dates["prix_moins_cher"]).abs() < 1)
 tableau = pd.DataFrame({
     "Départ": [f"{nom_aeroport(o, origines[o])} ({o})" for o in dates["origine"]],
     "Ville d'arrivée": dates["ville_arrivee"], "Code": dates["destination"],
@@ -401,11 +427,11 @@ tableau = pd.DataFrame({
     "Collecté le": pd.to_datetime(dates["collecte_moins_cher"].where(~sans_resultat, [
         heures_recherche.get((d, j)) for d, j in zip(dates["destination"], dates["date"])]))
         .dt.strftime("%d/%m/%Y %H:%M").fillna("—"),
-    # d'où vient le prix de la ligne : recherche d'une date (avec horaires) ou calendrier de l'année
+    # d'où vient le prix de la ligne : recherche d'une date, confirmée ou non par le calendrier de l'année
     "Origine du prix": pd.Series(np.select(
-        [sans_resultat, recherche & dates["heure_depart_mc"].notna(), recherche],
-        ["🟢 Recherche du jour (aucun vol)", "🟢 Recherche du jour", "🔵 Calendrier de l'année"], "—"),
-        index=dates.index),
+        [sans_resultat, confirme, recherche],
+        ["🟢 Recherche du jour (aucun vol)", "🟢🔵 Recherche du jour = calendrier de l'année", "🟢 Recherche du jour"],
+        "—"), index=dates.index),
 })
 if cies:  # colonnes de la compagnie de la ligne : son prix et son bagage ce jour-là
     prix_comp = pd.to_numeric(dates["prix_compagnie"], errors="coerce")
@@ -422,7 +448,21 @@ st.caption(f"{len(tableau):,} lignes".replace(",", " ")
            + f" ({len(departs)} aéroport(s) de départ × {dates['destination'].nunique()} destinations × "
            f"{len(jours)} date(s)" + (f" × {len(cies)} compagnie(s)" if cies else "") + "). "
            f"« {A_COMPLETER} » : date pas encore recherchée ; « {AUCUN_VOL} » : recherchée, sans vol depuis cet "
-           "aéroport ; « Origine du prix » : 🟢 recherche d'une date (avec heures), 🔵 calendrier de l'année.")
+           "aéroport ; « Origine du prix » : 🟢 recherche d'une date (avec heures), 🟢🔵 même prix que le "
+           "calendrier de l'année.")
 # lazy=False : au-delà de 150 000 lignes Streamlit charge le tableau par morceaux, liés à la session du navigateur ;
 # après une reconnexion, ces morceaux échouent (« Failed to load data »). On envoie tout d'un coup.
 st.dataframe(tableau, hide_index=True, width="stretch", lazy=False)
+
+# --- Rafraîchir la table : la garder dans « Historique tables rafraîchies », puis repartir d'une table vide ----------
+if st.button("🧹 Rafraîchir la table", disabled=not (recherche | sans_resultat).any(),
+             help="Enregistre le tableau ci-dessus dans la page « Historique tables rafraîchies », puis le vide : "
+                  "le tableau disparaît et « Actualiser » recherche de nouveau toutes ses dates. Les prix restent "
+                  "utilisables dans les autres pages (Comparatif, Data Visualisation…)."):
+    description = (f"{', '.join(noms_villes_depart[v] for v in choix_depart)} → "
+                   f"{', '.join(villes) if villes else 'toutes les destinations'} · "
+                   f"du {premier:%d/%m/%Y} au {dernier:%d/%m/%Y} · {nuits_ar} nuit(s)"
+                   + (f" · {', '.join(cies)}" if cies else ""))
+    catalogue.rafraichir_table(tableau, dates, description)
+    st.session_state["table_rafraichie"] = True
+    st.rerun()

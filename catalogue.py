@@ -148,6 +148,13 @@ CREATE TABLE IF NOT EXISTS vols_annee (   -- toute l'année d'un coup (calendrie
     date_retour   TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (origine, destination, date, date_retour, compagnie)
 );
+CREATE TABLE IF NOT EXISTS tables_videes (  -- « Rafraîchir la table » du Catalogue : prix d'avant masqués dans le tableau
+    destination TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    date_retour TEXT NOT NULL,
+    vide_le     TEXT NOT NULL,      -- les recherches faites jusqu'à cette heure ne s'affichent plus dans le Catalogue
+    PRIMARY KEY (destination, date, date_retour)
+);
 """
 
 
@@ -806,12 +813,14 @@ def candidats_annee(d: str, k: int = COMPAGNIES_PAR_DESTINATION) -> list[dict]:
     return infos[:k]
 
 
-async def collecter_annee(gf: GoogleFlights, d: str, nuits: int | None, fin: date) -> int:
-    """Toute l'année vers d depuis Paris : prix le plus bas de chaque date (toutes compagnies), puis prix de chaque
-    compagnie candidate ; enregistre dans vols_annee. Renvoie le nb de dates avec prix."""
+async def collecter_annee(gf: GoogleFlights, d: str, nuits: int | None, fin: date, debut: date | None = None) -> int:
+    """Toute l'année vers d depuis Paris (ou les dates de debut à fin) : prix le plus bas de chaque date (toutes
+    compagnies), puis prix de chaque compagnie candidate ; enregistre dans vols_annee. Renvoie le nb de dates avec prix."""
+    debut = debut or date.today()
+
     async def annee(compagnies=None):
         prix = {}
-        for a, b in tranches(date.today(), fin):
+        for a, b in tranches(debut, fin):
             try:
                 prix |= await gf.calendrier_paris(d, a, b, nuits, compagnies)
             except PlageInvalide:  # au-delà de l'horizon de Google pour ce trajet
@@ -839,25 +848,30 @@ async def collecter_annee(gf: GoogleFlights, d: str, nuits: int | None, fin: dat
                 trouve |= p <= plus_bas
         if not trouve:  # le prix le plus bas vient d'une compagnie qui n'a pas été interrogée
             lignes.append((origine_defaut, d, jour, "?", None, plus_bas, None, maintenant, None, None, None, retour))
-    with closing(connexion()) as con, con:
+    with closing(connexion()) as con, con:  # remplace les anciens prix de la période recherchée seulement
+        periode = (d, debut.isoformat(), fin.isoformat())
         if nuits:
-            con.execute("DELETE FROM vols_annee WHERE destination = ? AND date_retour != ''"
-                        " AND julianday(date_retour) - julianday(date) = ?", (d, nuits))
+            con.execute("DELETE FROM vols_annee WHERE destination = ? AND date BETWEEN ? AND ? AND date_retour != ''"
+                        " AND julianday(date_retour) - julianday(date) = ?", (*periode, nuits))
         else:
-            con.execute("DELETE FROM vols_annee WHERE destination = ? AND date_retour = ''", (d,))
+            con.execute("DELETE FROM vols_annee WHERE destination = ? AND date BETWEEN ? AND ? AND date_retour = ''",
+                        periode)
         con.executemany("INSERT OR REPLACE INTO vols_annee VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", lignes)
     return len(tous)
 
 
-def duree_annee(n_destinations: int) -> int:
-    """Minutes estimées pour actualiser_annee (2 tranches × (1 + compagnies) appels par destination, espacés du délai
-    du rythme actuel)."""
-    return max(1, round(n_destinations * 2 * (1 + COMPAGNIES_PAR_DESTINATION) * lire_rythme()["delai"] / 60))
+def duree_annee(n_destinations: int, jours: int | None = None) -> int:
+    """Minutes estimées pour actualiser_annee (tranches de TRANCHE_JOURS jours × (1 + compagnies) appels par
+    destination, espacés du délai du rythme actuel) ; jours : longueur de la période (sinon l'année, 2 tranches)."""
+    n_tranches = -(-jours // TRANCHE_JOURS) if jours else 2
+    return max(1, round(n_destinations * n_tranches * (1 + COMPAGNIES_PAR_DESTINATION) * lire_rythme()["delai"] / 60))
 
 
 async def actualiser_annee(destinations: list[str], nuits: int | None = None, delai: float | None = None,
-                           on_progress=None, parallele: int | None = None) -> int:
-    """Toute l'année d'un coup pour ces destinations depuis Paris (aller simple ou aller-retour de `nuits` nuits).
+                           on_progress=None, parallele: int | None = None, debut: date | None = None,
+                           fin: date | None = None) -> int:
+    """Toute l'année d'un coup pour ces destinations depuis Paris (aller simple ou aller-retour de `nuits` nuits) ;
+    debut / fin : seulement ces dates de départ.
     Chaque destination est enregistrée dès qu'elle est finie. Renvoie le nb de destinations avec prix.
     Lève Bloque si Google bloque."""
     rythme = lire_rythme()
@@ -867,7 +881,7 @@ async def actualiser_annee(destinations: list[str], nuits: int | None = None, de
     with closing(connexion()) as con:
         derniere = con.execute("SELECT MAX(date) FROM calendrier").fetchone()[0]
     horizon_google = date.today() + timedelta(days=327)  # au-delà, Google refuse la plage
-    fin = min(date.fromisoformat(derniere), horizon_google) if derniere else horizon_google
+    fin = min(fin or horizon_google, date.fromisoformat(derniere) if derniere else horizon_google, horizon_google)
     faites, trouvees = 0, 0
 
     async def une(d):
@@ -876,7 +890,7 @@ async def actualiser_annee(destinations: list[str], nuits: int | None = None, de
             if bloque.is_set():
                 return
             try:
-                n = await collecter_annee(gf, d, nuits, fin)
+                n = await collecter_annee(gf, d, nuits, fin, debut)
             except Bloque:
                 bloque.set()
                 return
@@ -1067,6 +1081,49 @@ def reprendre_actualisation() -> int:
 # Historique : à la fin de chaque actualisation, son bilan (période, heure, durée) est copié dans
 # historique_actualisations/
 DOSSIER_HISTORIQUE_ACTUALISATIONS = Path(__file__).with_name("historique_actualisations")
+DOSSIER_TABLES = Path(__file__).with_name("historique_tables")  # tables rafraîchies du Catalogue
+
+
+def rafraichir_table(tableau: pd.DataFrame, paires: pd.DataFrame, description: str) -> str:
+    """« Rafraîchir la table » : enregistre le tableau affiché dans historique_tables (tableau en .parquet et sa
+    description en .json), puis le vide : les recherches déjà faites pour ces (destination, date, date_retour) ne
+    s'affichent plus dans le Catalogue (« à compléter », à rechercher de nouveau). Elles restent dans la base pour les
+    autres pages. Renvoie le nom de l'enregistrement."""
+    maintenant = datetime.now()
+    nom = f"{maintenant:%Y-%m-%d_%H%M%S}"
+    DOSSIER_TABLES.mkdir(exist_ok=True)
+    tableau.to_parquet(DOSSIER_TABLES / f"{nom}.parquet", index=False)
+    (DOSSIER_TABLES / f"{nom}.json").write_text(json.dumps(
+        {"rafraichie_le": maintenant.isoformat(timespec="seconds"), "description": description,
+         "lignes": len(tableau)}, ensure_ascii=False), encoding="utf-8")
+    lignes = paires[["destination", "date", "date_retour"]].drop_duplicates()
+    with closing(connexion()) as con, con:
+        con.executemany("INSERT OR REPLACE INTO tables_videes VALUES (?, ?, ?, ?)",
+                        [(*r, maintenant.isoformat(timespec="seconds")) for r in lignes.itertuples(index=False)])
+    return nom
+
+
+def paires_videes(nuits: int | None) -> set[tuple[str, str]]:
+    """(destination, date) vidées par « Rafraîchir la table » pour ce nombre de nuits."""
+    with closing(connexion()) as con:
+        v = pd.read_sql_query("SELECT destination, date, date_retour FROM tables_videes", con)
+    v = v[v["date_retour"] == _retours(v["date"], nuits)]
+    return set(zip(v["destination"], v["date"]))
+
+
+def tables_rafraichies() -> list[dict]:
+    """Tables rafraîchies enregistrées, la plus récente d'abord : {nom, rafraichie_le, description, lignes}."""
+    resultat = []
+    for f in sorted(DOSSIER_TABLES.glob("*.json"), reverse=True) if DOSSIER_TABLES.exists() else []:
+        try:
+            resultat.append({"nom": f.stem} | json.loads(f.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return resultat
+
+
+def lire_table_rafraichie(nom: str) -> pd.DataFrame:
+    return pd.read_parquet(DOSSIER_TABLES / f"{nom}.parquet")
 
 
 def archiver_actualisation():
@@ -1727,16 +1784,29 @@ def calendrier_ar_origines(origines: list[str], nuits: int) -> pd.DataFrame:
             f" WHERE duree = ? AND origine IN ({','.join('?' * len(origines))})", con, params=[nuits, *origines])
 
 
-def vols_jour_tableau(origines: list[str], nuits: int | None = None, annee: bool = False) -> pd.DataFrame:
+def _sans_videes(df: pd.DataFrame, videes: pd.DataFrame) -> pd.DataFrame:
+    """Retire les recherches faites avant le dernier « Rafraîchir la table » de leur destination, date et retour."""
+    if df.empty or videes.empty:
+        return df
+    vide_le = df.merge(videes, how="left", on=["destination", "date", "date_retour"])["vide_le"]
+    return df[(vide_le.isna() | (df["collecte_le"].values > vide_le.fillna("").values)).values]
+
+
+def vols_jour_tableau(origines: list[str], nuits: int | None = None, annee: bool = False,
+                      catalogue: bool = False) -> pd.DataFrame:
     """Recherches d'une date (vols_jour) en aller simple, ou en aller-retour de `nuits` nuits.
-    annee : complétées par « toute l'année » (vols_annee) pour les dates qui n'ont pas eu de recherche d'une date."""
+    annee : complétées par « toute l'année » (vols_annee) pour les dates qui n'ont pas eu de recherche d'une date.
+    catalogue : sans les recherches masquées par « Rafraîchir la table » (tableau du Catalogue seulement)."""
     marques = ",".join("?" * len(origines))
     with closing(connexion()) as con:
         vj = pd.read_sql_query(f"SELECT * FROM vols_jour WHERE origine IN ({marques}) OR origine = '-'",
                                con, params=origines)  # « - » : recherche faite sans aucun vol
         va = pd.read_sql_query(f"SELECT * FROM vols_annee WHERE origine IN ({marques}) AND date >= ?",
                                con, params=[*origines, date.today().isoformat()]) if annee else None
-    vj = vj[vj["date_retour"] == _retours(vj["date"], nuits)]
+        videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if catalogue else pd.DataFrame()
+    vj = _sans_videes(vj[vj["date_retour"] == _retours(vj["date"], nuits)], videes)
+    if annee:
+        va = _sans_videes(va, videes)
     if annee and not va.empty:
         va = va[va["date_retour"] == _retours(va["date"], nuits)]
         cherchees = set(zip(vj["destination"], vj["date"]))  # la recherche d'une date (avec horaires) prime
@@ -1747,15 +1817,27 @@ def vols_jour_tableau(origines: list[str], nuits: int | None = None, annee: bool
     return vj
 
 
-def moins_cher_du_jour(origines: list[str], nuits: int | None = None) -> pd.DataFrame:
-    """Recherches d'une date (vols_jour, puis toute l'année) : compagnie du vol le moins cher par départ,
-    destination et date."""
-    vj = vols_jour_tableau(origines, nuits, annee=True)
+def moins_cher_du_jour(origines: list[str], nuits: int | None = None, catalogue: bool = False,
+                       annee: bool = True) -> pd.DataFrame:
+    """Recherches d'une date (vols_jour, puis toute l'année si annee) : compagnie du vol le moins cher par départ,
+    destination et date. catalogue : voir vols_jour_tableau."""
+    vj = vols_jour_tableau(origines, nuits, annee=annee, catalogue=catalogue)
     vj = vj[vj["compagnie"] != "-"][["origine", "destination", "date", "compagnie", "nom", "prix", "collecte_le",
                                      "heure_depart", "heure_arrivee", "duree", "bagage"]]
     return (vj.sort_values("prix").drop_duplicates(["origine", "destination", "date"])
               .rename(columns={"compagnie": "code_moins_cher", "nom": "nom_moins_cher", "prix": "prix_moins_cher",
                                "collecte_le": "collecte_moins_cher", "bagage": "bagage_moins_cher"}))
+
+
+def prix_annee_min(nuits: int | None, catalogue: bool = False) -> pd.Series:
+    """Prix le plus bas du calendrier de l'année (vols_annee) par (destination, date), pour ce nombre de nuits.
+    catalogue : voir vols_jour_tableau."""
+    with closing(connexion()) as con:
+        va = pd.read_sql_query("SELECT destination, date, date_retour, prix, collecte_le FROM vols_annee WHERE date >= ?",
+                               con, params=[date.today().isoformat()])
+        videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if catalogue else pd.DataFrame()
+    va = _sans_videes(va[va["date_retour"] == _retours(va["date"], nuits)], videes)
+    return va.groupby(["destination", "date"])["prix"].min()
 
 
 def compagnies_collectees() -> list[str]:

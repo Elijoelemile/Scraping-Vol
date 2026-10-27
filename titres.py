@@ -10,6 +10,7 @@ import streamlit as st
 COULEURS = {
     "donnee": ("#5fd3b4", "#0f6b55"),      # Charger la donnée : vert d'eau
     "catalogue": ("#7fb6f0", "#174a8b"),   # Catalogue : bleu ciel → bleu
+    "tables": ("#d6b98a", "#6b4a16"),      # Historique tables rafraîchies : sépia (archives)
     "recherche": ("#b79af0", "#4b2a8a"),   # Recherche détaillée : violet
     "pays": ("#7fdcf0", "#0b5f7a"),        # Pays → pays : bleu turquoise (le monde)
     "comparatif": ("#ffc163", "#b85c00"),  # Comparatif Airfox vs Google Flights : orangé
@@ -20,7 +21,7 @@ COULEURS = {
 
 
 # Fond de la page principale, une teinte très pâle de la couleur du thème (pages sans fond : blanc)
-FONDS = {"donnee": "#ecfaf6", "catalogue": "#f0f6fd", "recherche": "#f6f3fd", "pays": "#f0fbfd",
+FONDS = {"donnee": "#ecfaf6", "catalogue": "#f0f6fd", "tables": "#faf6ef", "recherche": "#f6f3fd", "pays": "#f0fbfd",
          "comparatif": "#fff8ec", "dataviz": "#fef4fa", "rapport": "#eff9f3", "assistant": "#fdf3f5"}
 
 

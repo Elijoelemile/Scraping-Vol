@@ -1,10 +1,11 @@
 """Construit la version portable de l'application : dist/Scraping Vol.zip.
 
 Le dossier contient son propre Python (version « embeddable » officielle), les bibliothèques de .venv et
-l'application avec ses données. Sur l'autre ordinateur (Windows 10/11, 64 bits) : décompresser, puis
-double-cliquer sur « Lancer Scraping Vol.bat ». Rien à installer.
+l'application, sans vos données : la base est créée vide au premier lancement.
+Sur l'autre ordinateur (Windows 10/11, 64 bits) : décompresser, puis double-cliquer sur « Lancer Scraping Vol.bat ». Rien à installer.
 
-    .venv\\Scripts\\python.exe construire_portable.py
+    .venv\\Scripts\\python.exe construire_portable.py                 (à partager : base vide)
+    .venv\\Scripts\\python.exe construire_portable.py --avec-ma-base  (pour soi : base, donnée Airfox, historiques)
 """
 import shutil
 import sqlite3
@@ -20,12 +21,15 @@ PORTABLE = DIST / "Scraping Vol"
 VERSION_PYTHON = "3.12.10"  # même version mineure que .venv (3.12) : les bibliothèques compilées restent compatibles
 URL_PYTHON = f"https://www.python.org/ftp/python/{VERSION_PYTHON}/python-{VERSION_PYTHON}-embed-amd64.zip"
 
-# Application : code, listes, base et donnée chargée. Pas de journaux, ni de réglages ou session personnels
-# (session Google, adresse e-mail des alertes), ni d'actualisation en cours.
+# Application : code et listes. Pas de journaux, ni de réglages ou session personnels (session Google, adresse
+# e-mail des alertes), ni d'actualisation en cours. Par défaut, pas vos données non plus : la personne qui reçoit
+# le zip part d'une base vide (créée au premier lancement) et charge sa propre donnée Airfox.
 FICHIERS = ["app.py", "catalogue.py", "db.py", "donnees.py", "google_flights_scraper.py", "pays.py", "recap.py",
-            "session_google.py", "titres.py", "alerte.py", "actions.py", "origines.txt", "requirements.txt", "README.md", "vols.db"]
-DOSSIERS = ["pages_app", "listes", "donnee_chargee", "historique_catalogue", "historique_actualisations",
-            ".streamlit"]  # .streamlit : réglages (police Montserrat)
+            "session_google.py", "titres.py", "alerte.py", "actions.py", "origines.txt", "requirements.txt", "README.md"]
+DOSSIERS = ["pages_app", "listes", ".streamlit"]  # .streamlit : réglages (police Montserrat)
+# --avec-ma-base : ajoute la base, la donnée Airfox chargée et les historiques (pour votre propre autre ordinateur)
+MES_DONNEES = (["vols.db"], ["donnee_chargee", "historique_catalogue", "historique_actualisations",
+                                "historique_tables"])
 
 LANCEUR = r"""@echo off
 chcp 65001 >nul
@@ -70,6 +74,8 @@ Ordinateur : Windows 10 ou 11, 64 bits, connecté à Internet. Rien à installer
 
 Pour quitter : fermer la fenêtre de l'application, puis la fenêtre noire.
 
+Au premier lancement, la base est vide : charger la donnée Airfox dans « Charger la donnée », puis lancer
+les recherches dans « Catalogue aller-retour ».
 Les données (catalogue, recherches, donnée Airfox, historiques) sont dans le dossier « app ».
 Les recherches faites sur cet ordinateur restent sur cet ordinateur.
 """
@@ -89,6 +95,9 @@ def ignorer(dossier, noms):
 
 
 def main():
+    fichiers, dossiers = FICHIERS, DOSSIERS
+    if "--avec-ma-base" in sys.argv:
+        fichiers, dossiers = FICHIERS + MES_DONNEES[0], DOSSIERS + MES_DONNEES[1]
     if PORTABLE.exists():
         shutil.rmtree(PORTABLE)
     python = PORTABLE / "python"
@@ -105,14 +114,14 @@ def main():
     print("Copie de l'application…")
     app = PORTABLE / "app"
     app.mkdir()
-    for f in FICHIERS:
+    for f in fichiers:
         if f == "vols.db" and (ICI / f).exists():
             # copie cohérente même si une actualisation écrit dans la base en ce moment
             with closing(sqlite3.connect(ICI / f)) as source, closing(sqlite3.connect(app / f)) as copie:
                 source.backup(copie)
         elif (ICI / f).exists():
             shutil.copy2(ICI / f, app / f)
-    for d in DOSSIERS:
+    for d in dossiers:
         if (ICI / d).exists():
             shutil.copytree(ICI / d, app / d, ignore=ignorer)
     (PORTABLE / "Lancer Scraping Vol.bat").write_text(LANCEUR.replace("\n", "\r\n"), encoding="utf-8")
