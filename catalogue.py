@@ -1103,6 +1103,12 @@ def rafraichir_table(tableau: pd.DataFrame, paires: pd.DataFrame, description: s
     return nom
 
 
+def derniere_vidange() -> str | None:
+    """Heure du dernier « Rafraîchir la table » (None s'il n'y en a pas eu)."""
+    with closing(connexion()) as con:
+        return con.execute("SELECT MAX(vide_le) FROM tables_videes").fetchone()[0]
+
+
 def paires_videes(nuits: int | None) -> set[tuple[str, str]]:
     """(destination, date) vidées par « Rafraîchir la table » pour ce nombre de nuits."""
     with closing(connexion()) as con:
@@ -1715,7 +1721,9 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
     VilleDepart (PAR), VilleArrivee (code Airfox), DateAller, CodeTransporteur, Tarif, FlagBagageInclus.
     Une ligne par date et compagnie : le tarif le plus bas parmi les aéroports de Paris (aller simple, 1 adulte).
     Sources : calendriers par compagnie (collecter_compagnies) et recherches d'une date (vols_jour, plus récentes).
-    nuits : tarifs aller-retour (retour nuits jours après l'aller), issus des recherches d'une date seulement."""
+    nuits : tarifs aller-retour (retour nuits jours après l'aller), issus des recherches d'une date seulement.
+    seulement_actualise : uniquement ce que montre le tableau du Catalogue (recherches d'une date, sans les prix du
+    calendrier ni ceux masqués par « Rafraîchir la table »)."""
     vers_airfox = {a: v for v, aeroports in VILLES_AIRFOX.items() for a in aeroports if v != "PAR"}
     aeroports = sorted({a for v in villes_arrivee for a in VILLES_AIRFOX.get(v, [v])})
     if not aeroports:
@@ -1736,7 +1744,8 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
         annee = pd.read_sql_query(
             f"SELECT origine, destination, date, date_retour, compagnie, prix, bagage, collecte_le FROM vols_annee"
             f" WHERE destination IN ({marques}) AND date >= ?", con, params=[*aeroports, date.today().isoformat()])
-    jour = jour[jour["date_retour"] == _retours(jour["date"], nuits)].drop(columns="date_retour")
+        videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if seulement_actualise else pd.DataFrame()
+    jour = _sans_videes(jour[jour["date_retour"] == _retours(jour["date"], nuits)], videes).drop(columns="date_retour")
     # « toute l'année » : seulement les dates sans recherche d'une date (celle-ci, avec horaires, prime)
     annee = annee[annee["date_retour"] == _retours(annee["date"], nuits)].drop(columns="date_retour")
     cherchees = set(zip(jour["destination"], jour["date"]))
@@ -1744,6 +1753,8 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
     annee = annee[pd.Series([(d, j) not in cherchees for d, j in zip(annee["destination"], annee["date"])],
                    index=annee.index, dtype=bool)]
     annee = annee[annee["compagnie"] != "?"].assign(Source="calendrier de l'année")
+    if seulement_actualise:  # le calendrier de l'année ne sert qu'à confirmer les prix dans le Catalogue
+        annee = annee.iloc[0:0]
     # pas de calendrier aller-retour par compagnie ; seulement_actualise : uniquement les recherches du Catalogue
     if nuits or seulement_actualise:
         cal = cal.iloc[0:0]

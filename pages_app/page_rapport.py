@@ -9,6 +9,8 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
+
+import catalogue
 from titres import couleurs_graphiques, titre_page
 
 titre_page("Rapport Excel", "rapport")
@@ -19,6 +21,12 @@ jointure = st.session_state.get("rapport_jointure")
 jointure_mc = st.session_state.get("rapport_jointure_moins_chere")
 if airfox is None:
     st.info("Chargez d'abord le fichier Airfox dans la page « Comparatif Airfox vs Google Flights ».")
+    st.stop()
+if (google is None or google.empty or jointure is None
+        or st.session_state.get("rapport_vidange") != catalogue.derniere_vidange()):
+    st.info("Aucune donnée Google Flights pour le rapport : la table du Catalogue aller-retour est vide (rafraîchie ou "
+            "pas encore actualisée). Lancez « Actualiser » dans le Catalogue, puis ouvrez la page « Comparatif Airfox "
+            "vs Google Flights ».")
     st.stop()
 
 ECART = "Écart (Airfox − Google)"

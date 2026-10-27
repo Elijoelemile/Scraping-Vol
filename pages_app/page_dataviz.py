@@ -21,8 +21,11 @@ titre_page("Visualisation Graphiques", "dataviz")
 
 jointure = st.session_state.get("rapport_jointure")
 jointure_mc = st.session_state.get("rapport_jointure_moins_chere")
+if st.session_state.get("rapport_vidange") != catalogue.derniere_vidange():
+    jointure = jointure_mc = None  # table du Catalogue rafraîchie depuis : ces jointures sont périmées
 if jointure is None or jointure_mc is None:
-    st.info("Ouvrez d'abord la page « Comparatif Airfox vs Google Flights » : les graphiques utilisent ses jointures.")
+    st.info("Aucune donnée à afficher : la table du Catalogue aller-retour est vide (rafraîchie ou pas encore "
+            "actualisée), ou la page « Comparatif Airfox vs Google Flights » n'a pas encore été ouverte.")
     st.stop()
 # type de trajet réellement utilisé par les jointures du Comparatif (aller-retour de N nuits, ou aller simple)
 nuits = st.session_state.get("nuits_comparatif", st.session_state.get("nuits_catalogue"))

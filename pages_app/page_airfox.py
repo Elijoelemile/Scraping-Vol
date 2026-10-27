@@ -54,6 +54,9 @@ df = df.copy()
 st.session_state["rapport_airfox"] = df.copy()
 st.session_state["rapport_fichier"] = nom_fichier
 st.session_state["rapport_google"] = None
+# heure du dernier « Rafraîchir la table » : Data Visualisation et Rapport Excel n'utilisent pas des jointures plus
+# anciennes qu'elle (sinon ils montreraient une table déjà vidée)
+st.session_state["rapport_vidange"] = catalogue.derniere_vidange()
 st.session_state["rapport_jointure"] = None
 st.session_state["rapport_jointure_moins_chere"] = None
 
@@ -96,10 +99,10 @@ google = catalogue.tableau_google_airfox(sorted(df["VilleArrivee"].dropna().asty
                                         int(nuits) if aller_retour else None, seulement_actualise=True)
 st.session_state["rapport_google"] = google.copy()
 if google.empty:
-    st.info(f"Aucun tarif Google Flights aller-retour de {nuits} nuits pour les destinations de ce fichier. "
-            "Pour en obtenir : page Catalogue, tableau « Toutes les dates », choisissez « Aller-retour » et "
-            f"{nuits} nuits, puis « Actualiser en direct »." if aller_retour
-            else "Aucune donnée Google Flights pour les destinations de ce fichier.")
+    st.session_state["rapport_google"] = None
+    st.info(f"Aucun tarif Google Flights aller-retour de {nuits} nuits : la table du Catalogue aller-retour est vide "
+            "(pas encore actualisée, ou rafraîchie). Lancez « Actualiser » dans le Catalogue aller-retour pour la "
+            "remplir." if aller_retour else "Aucune donnée Google Flights pour les destinations de ce fichier.")
     st.stop()
 d1, d2, d3 = st.columns(3)
 d1.metric("Lignes", f"{len(google):,}".replace(",", " "))
