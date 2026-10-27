@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS vols_jour (   -- recherche d'une date : vol le moins 
     compagnie   TEXT NOT NULL,      -- code IATA ; plusieurs compagnies : AF/KL
     nom         TEXT,               -- nom affiché par Google (« Lufthansa City Airlines, Lufthansa »)
     prix        INTEGER NOT NULL,
-    bagage      INTEGER,            -- bagage cabine inclus (1/0)
+    bagage      INTEGER,            -- bagage en soute inclus (1/0)
     collecte_le TEXT NOT NULL,
     heure_depart  TEXT,             -- horaires du vol le moins cher de la compagnie
     heure_arrivee TEXT,             -- « 21:30 », « 06:40 (+1) » si l'on arrive le lendemain
@@ -130,7 +130,7 @@ CREATE TABLE IF NOT EXISTS compagnies_trajets (     -- bilan de la collecte par 
     nb_jours    INTEGER NOT NULL,
     prix_min    INTEGER,
     date_prix_min TEXT,
-    bagage      INTEGER,            -- bagage cabine inclus (1/0) sur le vol le moins cher ; NULL = inconnu
+    bagage      INTEGER,            -- bagage en soute inclus (1/0) sur le vol le moins cher ; NULL = inconnu
     PRIMARY KEY (origine, destination, compagnie)
 );
 CREATE TABLE IF NOT EXISTS vols_annee (   -- toute l'année d'un coup (calendriers « Paris » par compagnie), sans horaires
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS vols_annee (   -- toute l'année d'un coup (calendrie
     compagnie   TEXT NOT NULL,      -- code IATA ; « ? » : prix le plus bas venant d'une compagnie non interrogée
     nom         TEXT,
     prix        INTEGER NOT NULL,
-    bagage      INTEGER,            -- bagage cabine de la compagnie sur ce trajet (recherches d'une date) ; NULL = inconnu
+    bagage      INTEGER,            -- bagage en soute de la compagnie sur ce trajet (recherches d'une date) ; NULL = inconnu
     collecte_le TEXT NOT NULL,
     heure_depart  TEXT,             -- toujours vides : le calendrier ne donne pas les horaires
     heure_arrivee TEXT,
@@ -365,6 +365,10 @@ class GoogleFlights:
         def duree_txt(m):
             return f"{m // 60} h {m % 60} min" if m % 60 else f"{m // 60} h"
 
+        def soute(b):
+            code = b[2] if isinstance(b, list) and len(b) > 2 else None
+            return True if code == 1 else False if code in (2, 3) else None
+
         def analyser(data) -> list[dict]:
             # Villes (en français) et identifiants de ville : départ/arrivée en [1], aéroports d'escale en [17]
             villes, a_memoriser = {}, []
@@ -413,8 +417,9 @@ class GoogleFlights:
                         "code_compagnie": (info[0] if info[0] and info[0] != "multi" else
                                            "/".join(dict.fromkeys(x[22][0] for x in etapes
                                                                   if len(x) > 22 and x[22] and x[22][0]))),
-                        # Bagage cabine : False si Google indique qu'il n'est pas inclus (tarifs « light »), sinon True
-                        "bagage": not (len(e) > 5 and e[5] and e[5][0]),
+                        # Bagage en soute inclus (comme FlagBagageInclus d'Airfox) : e[4][2] = 1 (poids en kg en
+                        # e[4][3], ex. 23) si inclus, 2 ou 3 s'il est payant ; autre valeur ou absent : inconnu
+                        "bagage": soute(e[4] if len(e) > 4 else None),
                     })
             return liste
 
@@ -781,7 +786,7 @@ COMPAGNIES_PAR_DESTINATION = 4  # compagnies interrogées par destination (les m
 
 def candidats_annee(d: str, k: int = COMPAGNIES_PAR_DESTINATION) -> list[dict]:
     """Compagnies à interroger pour d : les mieux classées (rang de prix) dans les recherches d'une date déjà faites
-    depuis Paris, avec leur aéroport habituel, leur nom et leur bagage cabine."""
+    depuis Paris, avec leur aéroport habituel, leur nom et leur bagage en soute."""
     with closing(connexion()) as con:
         vj = pd.read_sql_query(
             f"SELECT origine, date, date_retour, compagnie, nom, prix, bagage, collecte_le FROM vols_jour"
@@ -1232,7 +1237,7 @@ async def collecter_jour(jour: str, destinations: list[str], delai: float, pause
 
 
 async def bagage_compagnie(gf: GoogleFlights, o: str, d: str, c: str, jour: str) -> int | None:
-    """Bagage cabine inclus (1/0) sur le vol le moins cher de la compagnie ce jour-là ; None si introuvable.
+    """Bagage en soute inclus (1/0) sur le vol le moins cher de la compagnie ce jour-là ; None si introuvable.
     Les itinéraires avec correspondance comptent aussi (ex. « AF/UX » via Madrid pour Air Europa depuis CDG)."""
     from google_flights_scraper import Trajet
     vols = [v for v in await gf.vols(Trajet(o, d, jour))
@@ -1240,7 +1245,8 @@ async def bagage_compagnie(gf: GoogleFlights, o: str, d: str, c: str, jour: str)
     if not vols:
         return None
     seuls = [v for v in vols if v["code_compagnie"] == c]  # de préférence un vol de la compagnie seule
-    return int(min(seuls or vols, key=lambda v: v["prix_eur"])["bagage"])
+    bagage = min(seuls or vols, key=lambda v: v["prix_eur"])["bagage"]
+    return None if bagage is None else int(bagage)
 
 
 async def completer_bagages(compagnies: list[str], delai: float, log=print) -> int:
@@ -1274,7 +1280,7 @@ async def completer_bagages(compagnies: list[str], delai: float, log=print) -> i
 async def collecter_compagnies(compagnies: list[str], delai: float, pause_blocage_min: float = 60,
                                max_blocages: int = 10, origines=None, destinations=None, log=print) -> int:
     """Calendrier sur 1 an de chaque compagnie, pour les trajets du catalogue qui ont des prix, plus le bagage
-    cabine (vol le moins cher de la compagnie, à sa date la moins chère). Reprend là où elle s'est arrêtée."""
+    en soute (vol le moins cher de la compagnie, à sa date la moins chère). Reprend là où elle s'est arrêtée."""
     with closing(connexion()) as con:
         trajets = con.execute("SELECT origine, destination FROM trajets_catalogue WHERE nb_jours_prix > 0"
                               " ORDER BY prix_min").fetchall()
@@ -1677,7 +1683,9 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
     # « toute l'année » : seulement les dates sans recherche d'une date (celle-ci, avec horaires, prime)
     annee = annee[annee["date_retour"] == _retours(annee["date"], nuits)].drop(columns="date_retour")
     cherchees = set(zip(jour["destination"], jour["date"]))
-    annee = annee[[(d, j) not in cherchees for d, j in zip(annee["destination"], annee["date"])]]
+    # masque indexé : une liste vide (aucun prix de l'année) viderait sinon les colonnes
+    annee = annee[pd.Series([(d, j) not in cherchees for d, j in zip(annee["destination"], annee["date"])],
+                   index=annee.index, dtype=bool)]
     annee = annee[annee["compagnie"] != "?"].assign(Source="calendrier de l'année")
     # pas de calendrier aller-retour par compagnie ; seulement_actualise : uniquement les recherches du Catalogue
     if nuits or seulement_actualise:
@@ -1732,7 +1740,9 @@ def vols_jour_tableau(origines: list[str], nuits: int | None = None, annee: bool
     if annee and not va.empty:
         va = va[va["date_retour"] == _retours(va["date"], nuits)]
         cherchees = set(zip(vj["destination"], vj["date"]))  # la recherche d'une date (avec horaires) prime
-        va = va[[(d, j) not in cherchees for d, j in zip(va["destination"], va["date"])]]
+        # masque indexé : une liste vide (aucun prix de l'année) viderait sinon les colonnes
+        va = va[pd.Series([(d, j) not in cherchees for d, j in zip(va["destination"], va["date"])],
+                       index=va.index, dtype=bool)]
         vj = pd.concat([vj, va], ignore_index=True)
     return vj
 

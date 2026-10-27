@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS vols (
     remarque         TEXT,
     logo             TEXT,             -- URL du logo de la compagnie (images Google)
     code_compagnie   TEXT,             -- code IATA (VY, AF…) ; plusieurs compagnies : AF/DL
-    bagage           INTEGER           -- bagage cabine inclus : 1 = True, 0 = False
+    bagage           INTEGER           -- bagage en soute inclus : 1 = True, 0 = False ; NULL = inconnu
 );
 CREATE INDEX IF NOT EXISTS idx_vols_recherche ON vols (recherche_id);
 """

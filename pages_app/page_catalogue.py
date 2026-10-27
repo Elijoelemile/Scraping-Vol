@@ -345,7 +345,7 @@ if (not jours_depart and dests_annee and set(departs) <= set(catalogue.PARIS_AER
                       f"~{catalogue.duree_annee(len(dests_annee))} min)", disabled=actif, width="stretch",
                       help="Plus rapide, sans les heures : pour chaque destination, le tarif aller-retour le plus bas "
                            "de chaque date jusqu'à la fin du calendrier Google, la compagnie qui le propose et son "
-                           "bagage cabine. Ne touchez pas à la page pendant la recherche.")):
+                           "bagage en soute. Ne touchez pas à la page pendant la recherche.")):
     with st.status("Calendriers aller-retour de l'année sur Google Flights…", expanded=True) as statut:
         barre = st.progress(0.0)
         try:

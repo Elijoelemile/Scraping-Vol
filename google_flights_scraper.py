@@ -172,8 +172,8 @@ def parse_label(label: str, co2_label: str | None, ref: date) -> dict | None:
     d["prix_eur"] = int(re.sub(r"\D", "", prix)) if prix else None  # None = « Prix non disponible »
     d["escales"] = int(d["escales"] or 0)
     d["remarque"] = (d["remarque"] or "").strip()
-    # Bagage cabine : False si Google précise que le prix n'inclut pas les bagages (compartiment supérieur), sinon True
-    d["bagage"] = not re.search(r"bagage|compartiment", d["remarque"], re.I)
+    # Bagage en soute : la page de résultats ne le précise pas (seulement le bagage cabine) → inconnu
+    d["bagage"] = None
     d["operateur"] = d["operateur"] or ""
     d["duree_min"] = _minutes(d["duree"])
     d["date_depart"] = _iso_date(d["date_depart"], ref) or d["date_depart"]
@@ -331,7 +331,7 @@ COLONNES_COMPARATEUR = {  # ordre d'affichage, comme sur Google : compagnie, hor
     "logo": "Logo",
     "compagnies": "Compagnie aérienne",
     "code_compagnie": "Code compagnie",
-    "bagage": "Bagage",  # bagage cabine inclus : True / False (selon Google)
+    "bagage": "Bagage",  # bagage en soute inclus : True / False (selon Google), vide si inconnu
     "heure_depart": "Heure de départ",
     "arrivee_affichee": "Heure d'arrivée",
     "duree": "Durée",
