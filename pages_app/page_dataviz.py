@@ -185,8 +185,9 @@ else:
 
     # Pour fixer les tarifs : par situation de bagage, combien de dates où Airfox est au-dessus de Google et de
     # combien il faut baisser (baisse nécessaire = Airfox − Google quand Airfox est plus cher, sinon 0)
-    d1 = d1.assign(**{"Baisse nécessaire": d1[ECART].clip(lower=0),
-                      "Augmentation nécessaire": (-d1[ECART]).clip(lower=0), "Tarif cible": d1["Tarif Google"],
+    # Tarif cible = tarif Google seulement quand Google est moins cher que nous ; sinon vide (rien à viser)
+    d1 = d1.assign(**{"Baisse nécessaire": d1[ECART].clip(lower=0), "Augmentation nécessaire": 0.0,
+                      "Tarif cible": d1["Tarif Google"].where(d1[ECART] > 0),
                       "Situation bagage": [SITUATIONS.get((a, g), "Bagage inconnu")
                                            for a, g in zip(d1["Bagage Airfox"], d1["Bagage Google"])]})
     a_baisser = d1[d1[ECART] > 0]
@@ -288,11 +289,10 @@ else:
             for colonne, valeur in changements.items():
                 t.loc[t.index[int(ligne)], colonne] = valeur
         t = t.drop(index=[t.index[int(i)] for i in etat.get("deleted_rows", []) if int(i) < len(t)])
-        t["Tarif cible"] = pd.to_numeric(t["Tarif cible"], errors="coerce").fillna(
-            pd.to_numeric(t["Tarif Google"], errors="coerce"))
+        t["Tarif cible"] = pd.to_numeric(t["Tarif cible"], errors="coerce")  # vide : pas de cible
         ecart_cible = pd.to_numeric(t["Tarif Airfox"], errors="coerce") - t["Tarif cible"]
-        t["Baisse nécessaire"] = ecart_cible.clip(lower=0).round(2)
-        t["Augmentation nécessaire"] = (-ecart_cible).clip(lower=0).round(2)
+        t["Baisse nécessaire"] = ecart_cible.clip(lower=0).fillna(0).round(2)
+        t["Augmentation nécessaire"] = (-ecart_cible).clip(lower=0).fillna(0).round(2)
         return t
 
     # Le tableau ne reçoit de nouvelles données qu'au clic sur « Recalculer » : tant qu'on saisit, il ne bouge pas
@@ -315,8 +315,9 @@ else:
                     format="%.2f €", help="Airfox plus cher : de combien baisser pour atteindre le tarif cible"),
                 "Augmentation nécessaire": st.column_config.NumberColumn(
                     format="%.2f €", help="Airfox moins cher : de combien augmenter pour atteindre le tarif cible"),
-                "Tarif cible": st.column_config.NumberColumn(format="%.2f €", min_value=0, required=True,
-                                                             help="Le tarif à viser : par défaut le tarif Google"),
+                "Tarif cible": st.column_config.NumberColumn(
+                    format="%.2f €", min_value=0,
+                    help="Le tarif à viser : le tarif Google quand Google est moins cher, sinon vide (saisissable)"),
                 **{c: None for c in ("date_vol", "VilleDepart", "AeroportDepart", "VilleArrivee", "AeroportArrivee",
                                      "Bagage Airfox", "Bagage Google")},
             })
@@ -334,7 +335,7 @@ else:
                    "tableau reste en place pendant vos saisies, puis « Recalculer » met à jour baisse et augmentation "
                    "(l'enregistrement en tient compte de toute façon). Pour retirer une ligne, cochez-la à gauche puis "
                    "appuyez sur Suppr (ou l'icône corbeille). Tarif cible par défaut = tarif Google de la même "
-                   "compagnie ce jour-là. Le tableau se télécharge en CSV (icône en haut à droite).")
+                   "compagnie ce jour-là quand Google est moins cher que nous, sinon vide. Le tableau se télécharge en CSV (icône en haut à droite).")
 
         # Contexte de la décision : saison, vacances, événements… pour que l'agent IA comprenne ces choix plus tard
         st.html("""<style>

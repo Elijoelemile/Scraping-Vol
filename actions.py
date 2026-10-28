@@ -64,7 +64,8 @@ def enregistrer(actions: pd.DataFrame, contexte: str = "") -> int:
     lignes = [(maintenant.date().isoformat(), maintenant.isoformat(timespec="seconds"), r.ville_depart,
                r.aeroport_depart or "", r.ville_arrivee, r.aeroport_arrivee or "", r.date_vol, int(r.nuits or 0),
                r.compagnie, r.bagage_airfox, r.bagage_google, r.situation, float(r.tarif_airfox),
-               float(r.tarif_google), float(r.baisse), float(r.augmentation), float(r.tarif_cible),
+               float(r.tarif_google), float(r.baisse), float(r.augmentation),
+               None if pd.isna(r.tarif_cible) else float(r.tarif_cible),  # vide : pas de cible
                contexte.strip())
               for r in actions.itertuples(index=False)]
     with closing(connexion()) as con, con:

@@ -51,9 +51,11 @@ HEADERS = {
 SOCS = "CAESNQgjEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjYxMDA2LjA0X3AwGgJmciACGgYIgLqb1gY"
 FENETRE_JOURS = 365   # fenêtre demandée : 1 an à partir d'aujourd'hui
 TRANCHE_JOURS = 170   # Google refuse les plages de plus de ~181 jours
-# Durée maximale d'un trajet, à l'aller comme au retour, escales comprises : un vol plus long (même d'une minute)
-# n'est ni recherché ni enregistré
-DUREE_MAX_MIN = 9 * 60
+# Durée totale maximale des escales d'un trajet (attentes en correspondance additionnées) : un vol au-delà (même d'une
+# minute) n'est pas enregistré. Google ne filtre que chaque escale (ESCALE_FILTRE, aller et retour) ; le total est
+# vérifié vol par vol sur l'aller (seul trajet détaillé par Google)
+ESCALES_MAX_MIN = 9 * 60
+ESCALE_FILTRE = ESCALES_MAX_MIN  # [12] d'un segment : durée maximale de chaque escale (minutes)
 ORIGINES_FICHIER = Path(__file__).with_name("origines.txt")
 LOGOS = "https://www.gstatic.com/flights/airline_logos/70px/"  # logos des compagnies (images de Google)
 # Régions de destination interrogées une à une (identifiants Google) : sans elles, « Explorer »
@@ -206,7 +208,6 @@ class GoogleFlights:
         self._dernier = 0.0
         self._verrou = None         # espace les appels même quand plusieurs recherches tournent en parallèle
         self.at = None              # jeton anti-falsification exigé par Google pour un compte connecté
-        self.duree_max = DUREE_MAX_MIN  # aller et retour : seulement les trajets de cette durée au plus (minutes)
         biscuits = {"SOCS": SOCS} | (session_google.cookies() if connecte else {})
         self.connecte = "SID" in biscuits
         # délai de 60 s : les trajets rares prennent ~25 s côté Google
@@ -274,7 +275,7 @@ class GoogleFlights:
     def _filtre(o: str, d: str, jour: str, type_o=0, compagnies: list[str] | None = None) -> list:
         # compagnies : ne garder que les vols de ces compagnies (codes IATA), comme le filtre « Compagnies » de Google
         segment = [[[[o, type_o]]], [[[d, 0]]], None, 0, compagnies, None, jour,
-                   [DUREE_MAX_MIN], None, None, None, None, None, None, 3]
+                   None, None, None, None, None, ESCALE_FILTRE, None, 3]
         return [None, None, 2, None, [], 1, [1, 0, 0, 0], None, None, None, None, None, None,
                 [segment], None, None, None, 1]
 
@@ -305,8 +306,8 @@ class GoogleFlights:
     async def calendrier_ar(self, o: str, d: str, debut: date, fin: date, duree: int) -> dict[str, tuple[str, int]]:
         """{date aller: (date retour, prix aller-retour)} pour un séjour de `duree` jours."""
         def segment(a, b, jour):
-            return [[[[a, 0]]], [[[b, 0]]], None, 0, None, None, jour, [self.duree_max] if self.duree_max else None,
-                    None, None, None, None, None, None, 3]
+            return [[[[a, 0]]], [[[b, 0]]], None, 0, None, None, jour, None, None, None, None, None, ESCALE_FILTRE,
+                    None, 3]
         filtre = [None, None, 1, None, [], 1, [1, 0, 0, 0], None, None, None, None, None, None,
                   [segment(o, d, debut.isoformat()), segment(d, o, (debut + timedelta(days=duree)).isoformat())],
                   None, None, None, 1]
@@ -322,8 +323,8 @@ class GoogleFlights:
         entre debut et fin (une plage ≤ TRANCHE_JOURS) ; nuits : aller-retour ; compagnies : ces compagnies seulement."""
         def segment(a, b, jour):
             lieu = lambda x: [[[PARIS_MID, 4]]] if x == "PAR" else [[[x, 0]]]
-            return [lieu(a), lieu(b), None, 0, compagnies, None, jour, [self.duree_max] if self.duree_max else None,
-                    None, None, None, None, None, None, 3]
+            return [lieu(a), lieu(b), None, 0, compagnies, None, jour, None, None, None, None, None, ESCALE_FILTRE,
+                    None, 3]
         segments = [segment("PAR", d, debut.isoformat())]
         if nuits:
             segments.append(segment(d, "PAR", (debut + timedelta(days=nuits)).isoformat()))
@@ -356,9 +357,8 @@ class GoogleFlights:
                 return [[[lieux[code][0], lieux[code][1]]]]
             return [[[mids[code], 4]]] if code in mids else [[[code, 0]]]
 
-        def segment(a, b, jour):  # [7] : durée maximale du trajet en minutes (filtre « Durée du trajet » de Google)
-            return [lieu(a), lieu(b), None, 0, None, None, jour, [self.duree_max] if self.duree_max else None, None,
-                    None, None, None, None, None, 3]
+        def segment(a, b, jour):  # [12] : durée de chaque escale (filtre « Durée de l'escale » de Google)
+            return [lieu(a), lieu(b), None, 0, None, None, jour, None, None, None, None, None, ESCALE_FILTRE, None, 3]
         segments = [segment(t.origine, t.destination, t.date)]
         if t.retour:
             segments.append(segment(t.destination, t.origine, t.retour))
@@ -415,6 +415,7 @@ class GoogleFlights:
                         "_cle": cle,
                         "compagnies": " et ".join(info[1]), "operateur": ", ".join(operateurs),
                         "escales": len(escales),
+                        "escales_min": sum(x[0] or 0 for x in escales),  # attentes en correspondance additionnées
                         "detail_escales": "; ".join(f"{x[5] or x[1]} ({duree_txt(x[0])})" for x in escales),
                         "aeroport_depart": etapes[0][4] if etapes else "",
                         "aeroport_arrivee": etapes[-1][5] if etapes else "",
@@ -707,8 +708,8 @@ async def rechercher_jour(gf: GoogleFlights, d: str, jour: str, origines: list[s
         for v in vols:
             # aéroports parfois donnés par leur nom (« Aéroport de Paris-Orly ») : on retrouve le code
             depart = next((c for c in codes if _meme_aeroport(v.get("aeroport_depart"), c)), None)
-            # sécurité : aller de plus de DUREE_MAX_MIN jamais enregistré (Google filtre déjà aller et retour)
-            if v.get("prix_eur") is None or not depart or (v.get("duree_min") or 0) > DUREE_MAX_MIN:
+            # escales de l'aller de plus de ESCALES_MAX_MIN au total : jamais enregistré
+            if v.get("prix_eur") is None or not depart or (v.get("escales_min") or 0) > ESCALES_MAX_MIN:
                 continue
             cle = (depart, v.get("code_compagnie") or "?")
             if cle not in meilleurs or v["prix_eur"] < meilleurs[cle]["prix_eur"]:
