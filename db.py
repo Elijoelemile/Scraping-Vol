@@ -90,6 +90,11 @@ def enregistrer(vols: list[dict], path: Path = DB_PATH) -> list[int]:
     if not vols:
         return []
     df = pd.DataFrame(vols)
+    if "duree_min" in df:  # vols de plus de 9 h (même d'une minute) jamais enregistrés (catalogue.DUREE_MAX_MIN)
+        from catalogue import DUREE_MAX_MIN
+        df = df[~(pd.to_numeric(df["duree_min"], errors="coerce") > DUREE_MAX_MIN)]
+        if df.empty:
+            return []
     df["date_retour"] = df["date_retour"].fillna("")
     ids = []
     with closing(connexion(path)) as con, con:

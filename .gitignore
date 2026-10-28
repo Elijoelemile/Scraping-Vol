@@ -24,6 +24,7 @@ donnee_chargee/
 actualisation.json
 actualisation.tmp
 actualisation_paires.json
+derniere_table.json
 actualisation.arret
 actualisation.log
 historique_actualisations/
@@ -37,3 +38,4 @@ couleurs_graphiques.json
 
 # Version portable (python + bibliothèques + application, ~140 Mo) : se refait avec construire_portable.py
 dist/
+sauvegardes/

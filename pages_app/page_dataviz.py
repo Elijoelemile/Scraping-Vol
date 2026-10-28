@@ -51,10 +51,15 @@ def nom_ville(code: str) -> str:
 
 
 def chiffres_cles(tab: pd.DataFrame):
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Comparaisons", f"{len(tab):,}".replace(",", " "))
-    c2.metric("Écart médian", f"{tab[ECART].median():+.0f} €" if len(tab) else "—")
-    c3.metric("Google moins cher", f"{(tab[ECART] > 0).mean():.0%}" if len(tab) else "—")
+    c2.metric("Écart médian", f"{tab[ECART].median():+.0f} €" if len(tab) else "—",
+              help="Écart d'une ligne typique (la moitié des écarts au-dessous, l'autre au-dessus) : peu sensible "
+                   "aux tarifs extrêmes.")
+    c3.metric("Écart moyen", f"{tab[ECART].mean():+.0f} €" if len(tab) else "—",
+              help="Somme des écarts / nombre de lignes : l'effet global en euros. Très éloigné de l'écart médian ? "
+                   "Quelques tarifs extrêmes tirent la moyenne.")
+    c4.metric("Google moins cher", f"{(tab[ECART] > 0).mean():.0%}" if len(tab) else "—")
 
 
 # Couleurs des graphiques : la légende au-dessus de chaque graphique est cliquable (une pastille = un sélecteur de

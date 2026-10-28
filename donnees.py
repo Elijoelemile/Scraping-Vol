@@ -134,6 +134,11 @@ def garder(contenu: bytes, nom: str):
     (DOSSIER_DONNEE / nom).write_bytes(contenu)
 
 
+def donnee_presente() -> bool:
+    """Une donnée est chargée (sans la lire : pour les chiffres du Catalogue, relus toutes les 15 s)."""
+    return DOSSIER_DONNEE.exists() and any(DOSSIER_DONNEE.iterdir())
+
+
 def donnee_gardee() -> tuple[pd.DataFrame, str, int] | None:
     """(table, nom du fichier, taille en octets) de la donnée chargée, ou None si aucune."""
     fichiers = sorted(DOSSIER_DONNEE.iterdir()) if DOSSIER_DONNEE.exists() else []

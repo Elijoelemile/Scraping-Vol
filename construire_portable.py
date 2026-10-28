@@ -28,7 +28,7 @@ FICHIERS = ["app.py", "catalogue.py", "db.py", "donnees.py", "google_flights_scr
             "session_google.py", "titres.py", "alerte.py", "actions.py", "origines.txt", "requirements.txt", "README.md"]
 DOSSIERS = ["pages_app", "listes", ".streamlit"]  # .streamlit : réglages (police Montserrat)
 # --avec-ma-base : ajoute la base, la donnée Airfox chargée et les historiques (pour votre propre autre ordinateur)
-MES_DONNEES = (["vols.db"], ["donnee_chargee", "historique_catalogue", "historique_actualisations",
+MES_DONNEES = (["vols.db", "derniere_table.json"], ["donnee_chargee", "historique_catalogue", "historique_actualisations",
                                 "historique_tables"])
 
 LANCEUR = r"""@echo off

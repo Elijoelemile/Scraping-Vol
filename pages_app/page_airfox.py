@@ -155,10 +155,15 @@ def afficher_jointure(jointure: pd.DataFrame, nb_airfox: int):
     jointure[ECART] = (pd.to_numeric(jointure["Tarif Airfox"], errors="coerce")
                        - pd.to_numeric(jointure["Tarif Google"], errors="coerce")).round(2)
     jointure.insert(jointure.columns.get_loc("FlagBagageInclus Google") + 1, MEME_BAGAGE, meme_bagage(jointure))
-    j1, j2, j3 = st.columns(3)
+    j1, j2, j3, j4 = st.columns(4)
     j1.metric("Lignes jointes", f"{len(jointure):,}".replace(",", " "))
     j2.metric("Lignes Airfox sans équivalent Google", f"{nb_airfox - len(jointure):,}".replace(",", " "))
-    j3.metric("Écart médian", f"{jointure[ECART].median():.0f} €" if len(jointure) else "—")
+    j3.metric("Écart médian", f"{jointure[ECART].median():.0f} €" if len(jointure) else "—",
+              help="Écart de la ligne « du milieu » : la moitié des lignes a un écart plus faible, l'autre moitié "
+                   "plus fort. Peu sensible aux tarifs extrêmes : c'est l'écart d'une ligne typique.")
+    j4.metric("Écart moyen", f"{jointure[ECART].mean():.0f} €" if len(jointure) else "—",
+              help="Somme des écarts divisée par le nombre de lignes : l'effet global en euros. Très éloigné de "
+                   "l'écart médian ? Quelques tarifs extrêmes (erreur, classe affaires…) tirent la moyenne.")
     tarifs = [c for c in jointure.columns if c.startswith("Tarif")] + [ECART]
     pd.set_option("styler.render.max_elements", max(262144, jointure.size + 1))
     style = jointure.style.map(couleur_ecart, subset=[ECART]).map(couleur_bagage, subset=[MEME_BAGAGE])

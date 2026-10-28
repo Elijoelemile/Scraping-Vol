@@ -51,6 +51,9 @@ HEADERS = {
 SOCS = "CAESNQgjEitib3FfaWRlbnRpdHlmcm9udGVuZHVpc2VydmVyXzIwMjYxMDA2LjA0X3AwGgJmciACGgYIgLqb1gY"
 FENETRE_JOURS = 365   # fenêtre demandée : 1 an à partir d'aujourd'hui
 TRANCHE_JOURS = 170   # Google refuse les plages de plus de ~181 jours
+# Durée maximale d'un trajet, à l'aller comme au retour, escales comprises : un vol plus long (même d'une minute)
+# n'est ni recherché ni enregistré
+DUREE_MAX_MIN = 9 * 60
 ORIGINES_FICHIER = Path(__file__).with_name("origines.txt")
 LOGOS = "https://www.gstatic.com/flights/airline_logos/70px/"  # logos des compagnies (images de Google)
 # Régions de destination interrogées une à une (identifiants Google) : sans elles, « Explorer »
@@ -203,6 +206,7 @@ class GoogleFlights:
         self._dernier = 0.0
         self._verrou = None         # espace les appels même quand plusieurs recherches tournent en parallèle
         self.at = None              # jeton anti-falsification exigé par Google pour un compte connecté
+        self.duree_max = DUREE_MAX_MIN  # aller et retour : seulement les trajets de cette durée au plus (minutes)
         biscuits = {"SOCS": SOCS} | (session_google.cookies() if connecte else {})
         self.connecte = "SID" in biscuits
         # délai de 60 s : les trajets rares prennent ~25 s côté Google
@@ -270,7 +274,7 @@ class GoogleFlights:
     def _filtre(o: str, d: str, jour: str, type_o=0, compagnies: list[str] | None = None) -> list:
         # compagnies : ne garder que les vols de ces compagnies (codes IATA), comme le filtre « Compagnies » de Google
         segment = [[[[o, type_o]]], [[[d, 0]]], None, 0, compagnies, None, jour,
-                   None, None, None, None, None, None, None, 3]
+                   [DUREE_MAX_MIN], None, None, None, None, None, None, 3]
         return [None, None, 2, None, [], 1, [1, 0, 0, 0], None, None, None, None, None, None,
                 [segment], None, None, None, 1]
 
@@ -301,7 +305,8 @@ class GoogleFlights:
     async def calendrier_ar(self, o: str, d: str, debut: date, fin: date, duree: int) -> dict[str, tuple[str, int]]:
         """{date aller: (date retour, prix aller-retour)} pour un séjour de `duree` jours."""
         def segment(a, b, jour):
-            return [[[[a, 0]]], [[[b, 0]]], None, 0, None, None, jour, None, None, None, None, None, None, None, 3]
+            return [[[[a, 0]]], [[[b, 0]]], None, 0, None, None, jour, [self.duree_max] if self.duree_max else None,
+                    None, None, None, None, None, None, 3]
         filtre = [None, None, 1, None, [], 1, [1, 0, 0, 0], None, None, None, None, None, None,
                   [segment(o, d, debut.isoformat()), segment(d, o, (debut + timedelta(days=duree)).isoformat())],
                   None, None, None, 1]
@@ -317,7 +322,8 @@ class GoogleFlights:
         entre debut et fin (une plage ≤ TRANCHE_JOURS) ; nuits : aller-retour ; compagnies : ces compagnies seulement."""
         def segment(a, b, jour):
             lieu = lambda x: [[[PARIS_MID, 4]]] if x == "PAR" else [[[x, 0]]]
-            return [lieu(a), lieu(b), None, 0, compagnies, None, jour, None, None, None, None, None, None, None, 3]
+            return [lieu(a), lieu(b), None, 0, compagnies, None, jour, [self.duree_max] if self.duree_max else None,
+                    None, None, None, None, None, None, 3]
         segments = [segment("PAR", d, debut.isoformat())]
         if nuits:
             segments.append(segment(d, "PAR", (debut + timedelta(days=nuits)).isoformat()))
@@ -350,8 +356,9 @@ class GoogleFlights:
                 return [[[lieux[code][0], lieux[code][1]]]]
             return [[[mids[code], 4]]] if code in mids else [[[code, 0]]]
 
-        def segment(a, b, jour):
-            return [lieu(a), lieu(b), None, 0, None, None, jour, None, None, None, None, None, None, None, 3]
+        def segment(a, b, jour):  # [7] : durée maximale du trajet en minutes (filtre « Durée du trajet » de Google)
+            return [lieu(a), lieu(b), None, 0, None, None, jour, [self.duree_max] if self.duree_max else None, None,
+                    None, None, None, None, None, 3]
         segments = [segment(t.origine, t.destination, t.date)]
         if t.retour:
             segments.append(segment(t.destination, t.origine, t.retour))
@@ -374,7 +381,7 @@ class GoogleFlights:
 
         def soute(b):
             code = b[2] if isinstance(b, list) and len(b) > 2 else None
-            return True if code == 1 else False if code in (2, 3) else None
+            return True if code == 1 else False if code in (2, 3, 4) else None
 
         def analyser(data) -> list[dict]:
             # Villes (en français) et identifiants de ville : départ/arrivée en [1], aéroports d'escale en [17]
@@ -425,7 +432,8 @@ class GoogleFlights:
                                            "/".join(dict.fromkeys(x[22][0] for x in etapes
                                                                   if len(x) > 22 and x[22] and x[22][0]))),
                         # Bagage en soute inclus (comme FlagBagageInclus d'Airfox) : e[4][2] = 1 (poids en kg en
-                        # e[4][3], ex. 23) si inclus, 2 ou 3 s'il est payant ; autre valeur ou absent : inconnu
+                        # e[4][3], ex. 23) si inclus ; 2 ou 3 s'il est payant, 4 « Bagage enregistré non inclus
+                        # dans le prix » (ex. Etihad) : False ; autre valeur ou absent : inconnu (case vide)
                         "bagage": soute(e[4] if len(e) > 4 else None),
                     })
             return liste
@@ -699,7 +707,8 @@ async def rechercher_jour(gf: GoogleFlights, d: str, jour: str, origines: list[s
         for v in vols:
             # aéroports parfois donnés par leur nom (« Aéroport de Paris-Orly ») : on retrouve le code
             depart = next((c for c in codes if _meme_aeroport(v.get("aeroport_depart"), c)), None)
-            if v.get("prix_eur") is None or not depart:
+            # sécurité : aller de plus de DUREE_MAX_MIN jamais enregistré (Google filtre déjà aller et retour)
+            if v.get("prix_eur") is None or not depart or (v.get("duree_min") or 0) > DUREE_MAX_MIN:
                 continue
             cle = (depart, v.get("code_compagnie") or "?")
             if cle not in meilleurs or v["prix_eur"] < meilleurs[cle]["prix_eur"]:
@@ -1007,6 +1016,44 @@ def actualisation_active() -> bool:
     return bool(e) and e.get("statut") in ("en cours", "pause")
 
 
+FICHIER_DERNIERE_TABLE = Path(__file__).with_name("derniere_table.json")  # table du Catalogue lancée en dernier
+
+
+def memoriser_derniere_table(paires: list[tuple[str, str]], nuits: int | None, choix: dict | None = None):
+    """Table du Catalogue dont on vient de lancer l'actualisation (toutes ses (destination, date), même celles déjà
+    recherchées) : le Fichier Google Flights du Comparatif ne montre qu'elle. choix : les champs de la page
+    (départs, villes, dates, compagnies, nuits…), remis tels quels quand on revient sur le Catalogue."""
+    FICHIER_DERNIERE_TABLE.write_text(json.dumps({"nuits": nuits, "paires": [list(x) for x in paires],
+                                                  "choix": choix or {},
+                                                  "le": datetime.now().isoformat(timespec="seconds")},
+                                                 ensure_ascii=False), encoding="utf-8")
+
+
+def choix_derniere_table() -> dict:
+    """Champs du Catalogue de la dernière recherche lancée ({} s'il n'y en a pas)."""
+    try:
+        return json.loads(FICHIER_DERNIERE_TABLE.read_text(encoding="utf-8")).get("choix") or {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def derniere_table(nuits: int | None = None) -> set[tuple[str, str]]:
+    """(destination, date) de la dernière table lancée au Catalogue (vide s'il n'y en a pas) ; nuits : seulement si
+    elle a été lancée pour ce nombre de nuits."""
+    try:
+        d = json.loads(FICHIER_DERNIERE_TABLE.read_text(encoding="utf-8"))
+        return {tuple(x) for x in d["paires"]} if nuits is None or d.get("nuits") == nuits else set()
+    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        return set()
+
+
+def plancher_dates() -> date:
+    """Première date de départ affichée : aujourd'hui, ou plus tôt si la dernière table (rechargée de l'historique ou
+    recherchée avant) a des dates déjà passées ; elles restent consultables (sans pouvoir être recherchées)."""
+    table = derniere_table()
+    return min(date.today(), date.fromisoformat(min(j for _, j in table))) if table else date.today()
+
+
 def lancer_actualisation(paires: list[tuple[str, str]], origines: list[str], nuits: int | None, libelle: str):
     """Démarre les recherches de ces (destination, date) dans un processus à part."""
     import subprocess
@@ -1084,18 +1131,21 @@ DOSSIER_HISTORIQUE_ACTUALISATIONS = Path(__file__).with_name("historique_actuali
 DOSSIER_TABLES = Path(__file__).with_name("historique_tables")  # tables rafraîchies du Catalogue
 
 
-def rafraichir_table(tableau: pd.DataFrame, paires: pd.DataFrame, description: str) -> str:
+def rafraichir_table(tableau: pd.DataFrame, paires: pd.DataFrame, description: str, nuits: int | None = None,
+                     choix: dict | None = None) -> str:
     """« Rafraîchir la table » : enregistre le tableau affiché dans historique_tables (tableau en .parquet et sa
-    description en .json), puis le vide : les recherches déjà faites pour ces (destination, date, date_retour) ne
-    s'affichent plus dans le Catalogue (« à compléter », à rechercher de nouveau). Elles restent dans la base pour les
-    autres pages. Renvoie le nom de l'enregistrement."""
+    description en .json, avec ses (destination, date), ses nuits et les champs du Catalogue pour pouvoir la
+    recharger), puis le vide : les recherches déjà faites pour ces (destination, date, date_retour) ne s'affichent
+    plus dans le Catalogue (« à compléter », à rechercher de nouveau). Renvoie le nom de l'enregistrement."""
     maintenant = datetime.now()
     nom = f"{maintenant:%Y-%m-%d_%H%M%S}"
     DOSSIER_TABLES.mkdir(exist_ok=True)
     tableau.to_parquet(DOSSIER_TABLES / f"{nom}.parquet", index=False)
     (DOSSIER_TABLES / f"{nom}.json").write_text(json.dumps(
         {"rafraichie_le": maintenant.isoformat(timespec="seconds"), "description": description,
-         "lignes": len(tableau)}, ensure_ascii=False), encoding="utf-8")
+         "lignes": len(tableau), "nuits": nuits, "choix": choix or {},
+         "paires": sorted({(d, j) for d, j in zip(paires["destination"], paires["date"])})},
+        ensure_ascii=False), encoding="utf-8")
     lignes = paires[["destination", "date", "date_retour"]].drop_duplicates()
     with closing(connexion()) as con, con:
         con.executemany("INSERT OR REPLACE INTO tables_videes VALUES (?, ?, ?, ?)",
@@ -1103,10 +1153,16 @@ def rafraichir_table(tableau: pd.DataFrame, paires: pd.DataFrame, description: s
     return nom
 
 
-def derniere_vidange() -> str | None:
-    """Heure du dernier « Rafraîchir la table » (None s'il n'y en a pas eu)."""
+def derniere_vidange() -> str:
+    """Heure du dernier « Rafraîchir la table » et du dernier lancement d'une table au Catalogue : si l'une change,
+    les jointures du Comparatif gardées dans la session sont périmées."""
     with closing(connexion()) as con:
-        return con.execute("SELECT MAX(vide_le) FROM tables_videes").fetchone()[0]
+        vide_le = con.execute("SELECT MAX(vide_le) FROM tables_videes").fetchone()[0]
+    try:
+        lancee_le = json.loads(FICHIER_DERNIERE_TABLE.read_text(encoding="utf-8")).get("le")
+    except (FileNotFoundError, json.JSONDecodeError):
+        lancee_le = None
+    return f"{vide_le}|{lancee_le}"
 
 
 def paires_videes(nuits: int | None) -> set[tuple[str, str]]:
@@ -1128,8 +1184,45 @@ def tables_rafraichies() -> list[dict]:
     return resultat
 
 
+def libelle_table(t: dict) -> str:
+    """« 28/10/2026 à 10:17 — Paris → Punta Cana · du … au … · 7 nuit(s) (8 lignes) »."""
+    quand = datetime.fromisoformat(t["rafraichie_le"])
+    return f"{quand:%d/%m/%Y} à {quand:%H:%M} — {t['description']} ({t['lignes']:,} lignes)".replace(",", " ")
+
+
 def lire_table_rafraichie(nom: str) -> pd.DataFrame:
     return pd.read_parquet(DOSSIER_TABLES / f"{nom}.parquet")
+
+
+def recharger_table_rafraichie(nom: str):
+    """Remet une table rafraîchie dans le Catalogue pour la retravailler : ses recherches ne sont plus masquées et
+    elle redevient la dernière table (Catalogue, Comparatif, Data Visualisation, Rapport). Si certaines de ses dates
+    ont été recherchées depuis, ce sont les prix les plus récents qui s'affichent."""
+    info = json.loads((DOSSIER_TABLES / f"{nom}.json").read_text(encoding="utf-8"))
+    paires, nuits, choix = info.get("paires"), info.get("nuits"), info.get("choix")
+    if not paires or not nuits or not choix:  # table enregistrée avant : déduite du tableau et de sa description
+        t = lire_table_rafraichie(nom)
+        aller = pd.to_datetime(t["Date"], format="%d/%m/%Y")
+        nuits = int((pd.to_datetime(t["Date de retour"], format="%d/%m/%Y") - aller).dt.days.iloc[0])
+        paires = sorted(set(zip(t["Code"], aller.dt.strftime("%Y-%m-%d"))))
+        codes = {m.group(1) for x in t["Départ"].unique() if (m := re.search(r"\(([A-Z]{3})\)\s*$", str(x)))}
+        morceaux = info["description"].split(" · ")
+        choix = {"departs": sorted({"PAR" if c in PARIS_AEROPORTS else c for c in codes}),
+                 "villes": ([] if "toutes les destinations" in morceaux[0]
+                            else sorted(t["Ville d'arrivée"].dropna().unique())),
+                 "compagnies": morceaux[3].split(", ") if len(morceaux) > 3 else [], "masquer": False,
+                 "nuits": nuits, "dates": [aller.min().strftime("%Y-%m-%d"), aller.max().strftime("%Y-%m-%d")]}
+    paires = [tuple(p) for p in paires]
+    with closing(connexion()) as con, con:
+        con.executemany("DELETE FROM tables_videes WHERE destination = ? AND date = ? AND date_retour = ?",
+                        [(d, j, (date.fromisoformat(j) + timedelta(days=nuits)).isoformat()) for d, j in paires])
+    memoriser_derniere_table(paires, nuits, choix)
+
+
+def supprimer_table_rafraichie(nom: str):
+    """Supprime une table de l'historique (son .parquet et son .json)."""
+    for ext in (".parquet", ".json"):
+        (DOSSIER_TABLES / f"{nom}{ext}").unlink(missing_ok=True)
 
 
 def archiver_actualisation():
@@ -1722,8 +1815,8 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
     Une ligne par date et compagnie : le tarif le plus bas parmi les aéroports de Paris (aller simple, 1 adulte).
     Sources : calendriers par compagnie (collecter_compagnies) et recherches d'une date (vols_jour, plus récentes).
     nuits : tarifs aller-retour (retour nuits jours après l'aller), issus des recherches d'une date seulement.
-    seulement_actualise : uniquement ce que montre le tableau du Catalogue (recherches d'une date, sans les prix du
-    calendrier ni ceux masqués par « Rafraîchir la table »)."""
+    seulement_actualise : uniquement ce que montre la dernière table lancée au Catalogue (recherches d'une date, sans
+    les prix du calendrier ni ceux masqués par « Rafraîchir la table »)."""
     vers_airfox = {a: v for v, aeroports in VILLES_AIRFOX.items() for a in aeroports if v != "PAR"}
     aeroports = sorted({a for v in villes_arrivee for a in VILLES_AIRFOX.get(v, [v])})
     if not aeroports:
@@ -1736,16 +1829,20 @@ def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
             f" FROM calendrier_compagnie c JOIN compagnies_trajets t ON t.origine = c.origine"
             f" AND t.destination = c.destination AND t.compagnie = c.compagnie"
             f" WHERE c.origine IN ({paris}) AND c.destination IN ({marques}) AND c.date >= ?",
-            con, params=[*PARIS_AEROPORTS, *aeroports, date.today().isoformat()])
+            con, params=[*PARIS_AEROPORTS, *aeroports, plancher_dates().isoformat()])
         jour = pd.read_sql_query(
             f"SELECT origine, destination, date, date_retour, compagnie, prix, bagage, collecte_le FROM vols_jour"
             f" WHERE origine IN ({paris}) AND destination IN ({marques}) AND date >= ?",
-            con, params=[*PARIS_AEROPORTS, *aeroports, date.today().isoformat()])
+            con, params=[*PARIS_AEROPORTS, *aeroports, plancher_dates().isoformat()])
         annee = pd.read_sql_query(
             f"SELECT origine, destination, date, date_retour, compagnie, prix, bagage, collecte_le FROM vols_annee"
-            f" WHERE destination IN ({marques}) AND date >= ?", con, params=[*aeroports, date.today().isoformat()])
+            f" WHERE destination IN ({marques}) AND date >= ?", con, params=[*aeroports, plancher_dates().isoformat()])
         videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if seulement_actualise else pd.DataFrame()
     jour = _sans_videes(jour[jour["date_retour"] == _retours(jour["date"], nuits)], videes).drop(columns="date_retour")
+    if seulement_actualise:  # seulement la dernière table lancée au Catalogue
+        table = derniere_table()
+        jour = jour[pd.Series([(d, j) in table for d, j in zip(jour["destination"], jour["date"])],
+                              index=jour.index, dtype=bool)]
     # « toute l'année » : seulement les dates sans recherche d'une date (celle-ci, avec horaires, prime)
     annee = annee[annee["date_retour"] == _retours(annee["date"], nuits)].drop(columns="date_retour")
     cherchees = set(zip(jour["destination"], jour["date"]))
@@ -1845,7 +1942,7 @@ def prix_annee_min(nuits: int | None, catalogue: bool = False) -> pd.Series:
     catalogue : voir vols_jour_tableau."""
     with closing(connexion()) as con:
         va = pd.read_sql_query("SELECT destination, date, date_retour, prix, collecte_le FROM vols_annee WHERE date >= ?",
-                               con, params=[date.today().isoformat()])
+                               con, params=[plancher_dates().isoformat()])
         videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if catalogue else pd.DataFrame()
     va = _sans_videes(va[va["date_retour"] == _retours(va["date"], nuits)], videes)
     return va.groupby(["destination", "date"])["prix"].min()
