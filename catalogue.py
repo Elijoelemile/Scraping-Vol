@@ -1811,6 +1811,22 @@ VILLES_AIRFOX = {"PAR": PARIS_AEROPORTS, "LON": ["LHR", "LGW", "STN", "LTN", "LC
 
 def tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
                           seulement_actualise: bool = False) -> pd.DataFrame:
+    """Voir _tableau_google_airfox : calcul refait seulement si la base, la dernière table du Catalogue ou le jour
+    ont changé (sinon chaque clic de la page Comparatif le refaisait)."""
+    try:
+        derniere = FICHIER_DERNIERE_TABLE.stat().st_mtime_ns
+    except FileNotFoundError:
+        derniere = None
+    cle = ("google_airfox", tuple(villes_arrivee), nuits, seulement_actualise, date.today(), derniere, _etat_base())
+    if cle not in _lectures:
+        if len(_lectures) > 20:
+            _lectures.clear()
+        _lectures[cle] = _tableau_google_airfox(villes_arrivee, nuits, seulement_actualise)
+    return _lectures[cle].copy()
+
+
+def _tableau_google_airfox(villes_arrivee: list[str], nuits: int | None = None,
+                           seulement_actualise: bool = False) -> pd.DataFrame:
     """Données Google Flights du catalogue au format du fichier Airfox, pour la jointure :
     VilleDepart (PAR), VilleArrivee (code Airfox), DateAller, CodeTransporteur, Tarif, FlagBagageInclus.
     Une ligne par date et compagnie : le tarif le plus bas parmi les aéroports de Paris (aller simple, 1 adulte).
@@ -1901,18 +1917,39 @@ def _sans_videes(df: pd.DataFrame, videes: pd.DataFrame) -> pd.DataFrame:
     return df[(vide_le.isna() | (df["collecte_le"].values > vide_le.fillna("").values)).values]
 
 
+_lectures: dict = {}  # lectures de la base gardées tant qu'elle ne change pas : {(paramètres, état de la base): tables}
+
+
+def _etat_base() -> tuple:
+    """Change à chaque écriture dans la base (en WAL, toute écriture modifie vols.db-wal, puis vols.db)."""
+    return tuple((f.stat().st_mtime_ns, f.stat().st_size) if f.exists() else None
+                 for f in (DB_PATH, DB_PATH.with_name(DB_PATH.name + "-wal")))
+
+
+def _lectures_vols_jour(origines: tuple, annee: bool, catalogue: bool) -> tuple:
+    """Lectures de vols_jour_tableau (plus de 100 000 lignes), refaites seulement si la base a changé."""
+    cle = (origines, annee, catalogue, date.today(), _etat_base())
+    if cle not in _lectures:
+        if len(_lectures) > 20:
+            _lectures.clear()
+        marques = ",".join("?" * len(origines))
+        with closing(connexion()) as con:
+            vj = pd.read_sql_query(f"SELECT * FROM vols_jour WHERE origine IN ({marques}) OR origine = '-'",
+                                   con, params=list(origines))  # « - » : recherche faite sans aucun vol
+            va = pd.read_sql_query(f"SELECT * FROM vols_annee WHERE origine IN ({marques}) AND date >= ?",
+                                   con, params=[*origines, date.today().isoformat()]) if annee else None
+            videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if catalogue else pd.DataFrame()
+        _lectures[cle] = (vj, va, videes)
+    vj, va, videes = _lectures[cle]
+    return vj.copy(), None if va is None else va.copy(), videes.copy()
+
+
 def vols_jour_tableau(origines: list[str], nuits: int | None = None, annee: bool = False,
                       catalogue: bool = False) -> pd.DataFrame:
     """Recherches d'une date (vols_jour) en aller simple, ou en aller-retour de `nuits` nuits.
     annee : complétées par « toute l'année » (vols_annee) pour les dates qui n'ont pas eu de recherche d'une date.
     catalogue : sans les recherches masquées par « Rafraîchir la table » (tableau du Catalogue seulement)."""
-    marques = ",".join("?" * len(origines))
-    with closing(connexion()) as con:
-        vj = pd.read_sql_query(f"SELECT * FROM vols_jour WHERE origine IN ({marques}) OR origine = '-'",
-                               con, params=origines)  # « - » : recherche faite sans aucun vol
-        va = pd.read_sql_query(f"SELECT * FROM vols_annee WHERE origine IN ({marques}) AND date >= ?",
-                               con, params=[*origines, date.today().isoformat()]) if annee else None
-        videes = pd.read_sql_query("SELECT * FROM tables_videes", con) if catalogue else pd.DataFrame()
+    vj, va, videes = _lectures_vols_jour(tuple(origines), annee, catalogue)
     vj = _sans_videes(vj[vj["date_retour"] == _retours(vj["date"], nuits)], videes)
     if annee:
         va = _sans_videes(va, videes)

@@ -139,13 +139,21 @@ def donnee_presente() -> bool:
     return DOSSIER_DONNEE.exists() and any(DOSSIER_DONNEE.iterdir())
 
 
+_lue: dict = {}  # dernière donnée lue : {(nom, date de modification, taille): table}
+
+
 def donnee_gardee() -> tuple[pd.DataFrame, str, int] | None:
-    """(table, nom du fichier, taille en octets) de la donnée chargée, ou None si aucune."""
+    """(table, nom du fichier, taille en octets) de la donnée chargée, ou None si aucune.
+    Le fichier (plusieurs secondes de lecture pour un Excel) n'est relu que s'il a changé."""
     fichiers = sorted(DOSSIER_DONNEE.iterdir()) if DOSSIER_DONNEE.exists() else []
     if not fichiers:
         return None
-    contenu = fichiers[0].read_bytes()
-    return lire_fichier(contenu, fichiers[0].name), fichiers[0].name, len(contenu)
+    infos = fichiers[0].stat()
+    cle = (fichiers[0].name, infos.st_mtime_ns, infos.st_size)
+    if cle not in _lue:
+        _lue.clear()
+        _lue[cle] = lire_fichier(fichiers[0].read_bytes(), fichiers[0].name)
+    return _lue[cle].copy(), fichiers[0].name, infos.st_size
 
 
 def retirer():
