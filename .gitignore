@@ -39,3 +39,7 @@ couleurs_graphiques.json
 # Version portable (python + bibliothèques + application, ~140 Mo) : se refait avec construire_portable.py
 dist/
 sauvegardes/
+
+# Comptes de la page « Envoyer sur Drive » (empreintes des mots de passe) : propres à ce PC
+comptes_drive.json
+comptes_drive.tmp

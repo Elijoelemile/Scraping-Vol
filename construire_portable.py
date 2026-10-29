@@ -25,7 +25,7 @@ URL_PYTHON = f"https://www.python.org/ftp/python/{VERSION_PYTHON}/python-{VERSIO
 # e-mail des alertes), ni d'actualisation en cours. Par défaut, pas vos données non plus : la personne qui reçoit
 # le zip part d'une base vide (créée au premier lancement) et charge sa propre donnée Airfox.
 FICHIERS = ["app.py", "catalogue.py", "db.py", "donnees.py", "google_flights_scraper.py", "pays.py", "recap.py",
-            "session_google.py", "titres.py", "alerte.py", "actions.py", "origines.txt", "requirements.txt", "README.md"]
+            "session_google.py", "titres.py", "alerte.py", "actions.py", "comptes_drive.py", "origines.txt", "requirements.txt", "README.md"]
 DOSSIERS = ["pages_app", "listes", ".streamlit"]  # .streamlit : réglages (police Montserrat)
 # --avec-ma-base : ajoute la base, la donnée Airfox chargée et les historiques (pour votre propre autre ordinateur)
 MES_DONNEES = (["vols.db", "derniere_table.json"], ["donnee_chargee", "historique_catalogue", "historique_actualisations",

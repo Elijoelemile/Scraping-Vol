@@ -22,6 +22,7 @@ PAGES = [
     ("pages_app/page_dataviz.py", "Data Visualisation", "📈", "dataviz"),
     ("pages_app/page_rapport.py", "Rapport Excel", "📊", "rapport"),
     ("pages_app/page_assistant.py", "Assistant Décisionnel", "🤖", "assistant"),
+    ("pages_app/page_drive.py", "Envoyer sur Drive", "📤", "drive"),
 ]
 page = st.navigation([st.Page(f, title=t, icon=i, default=f.endswith("page_catalogue.py")) for f, t, i, _ in PAGES])
 # Boutons de la barre latérale en forme de pilule, aux couleurs du titre de leur page : dégradé vertical (reflet

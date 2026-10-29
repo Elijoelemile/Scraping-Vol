@@ -17,12 +17,14 @@ COULEURS = {
     "rapport": ("#7ccf9f", "#185c37"),     # Rapport Excel : vert Excel
     "dataviz": ("#f5a3d9", "#8e1f6b"),     # Data Visualisation : magenta
     "assistant": ("#f19aa8", "#8c1d32"),   # Assistant décisionnel : rouge bordeaux
+    "drive": ("#9fb3c8", "#2c3e55"),       # Envoyer sur Drive : gris ardoise
 }
 
 
 # Fond de la page principale, une teinte très pâle de la couleur du thème (pages sans fond : blanc)
 FONDS = {"donnee": "#ecfaf6", "catalogue": "#f0f6fd", "tables": "#faf6ef", "recherche": "#f6f3fd", "pays": "#f0fbfd",
-         "comparatif": "#fff8ec", "dataviz": "#fef4fa", "rapport": "#eff9f3", "assistant": "#fdf3f5"}
+         "comparatif": "#fff8ec", "dataviz": "#fef4fa", "rapport": "#eff9f3", "assistant": "#fdf3f5",
+         "drive": "#f3f5f8"}
 
 
 def aplat(couleur: str, part: float = 0.28) -> str:
