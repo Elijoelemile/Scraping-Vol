@@ -10,6 +10,7 @@ import streamlit as st
 
 import catalogue
 import donnees
+import planification
 from pays import pays_aeroport
 from titres import titre_page
 
@@ -31,6 +32,18 @@ def temps_texte(secondes: float) -> str:
 def duree_texte(n: int) -> str:
     """Durée estimée de n recherches au rythme actuel (adaptatif), ex. « ~1 h 15 », « ~2 j 1 h »."""
     return "~" + temps_texte(max(60, n * catalogue.secondes_par_recherche()))
+
+
+def encadre_duree(colonne, n: int):
+    """Sous un bouton de recherche : sa durée estimée en grand et l'heure de fin prévue, au rythme actuel."""
+    fin = datetime.now() + timedelta(seconds=max(60, n * catalogue.secondes_par_recherche()))
+    jour = "" if fin.date() == date.today() else f" le {fin:%d/%m}"
+    colonne.markdown(
+        "<div style='margin-top:-0.4rem;padding:0.45rem 0.8rem;border-radius:10px;background:#fff4dc;"
+        "border:1px solid #f0c060;color:#5a3d00;text-align:center;line-height:1.35'>"
+        f"⏱️ Durée estimée : <b style='font-size:1.3rem'>{duree_texte(n)}</b><br>"
+        f"<span style='font-size:0.9rem'>{n} recherches · fin prévue vers <b>{fin:%H:%M}{jour}</b></span></div>",
+        unsafe_allow_html=True)
 
 
 @st.fragment(run_every=3)
@@ -71,7 +84,7 @@ def suivi_actualisation():
             if c2.button("⏹ Arrêter", width="stretch", help="Les recherches déjà faites sont gardées ; "
                                                              "le bouton « Reprendre » permettra de continuer là où elles se sont arrêtées."):
                 catalogue.arreter_actualisation()
-                st.toast("Arrêt demandé : il prend effet après les recherches en cours (≈ 2 min).")
+                st.toast("Arrêt demandé : il prend effet dans quelques secondes, le temps de finir la recherche en cours.")
         return
     if st.session_state.pop("suivi_actif", False):
         st.rerun(scope="app")  # actualisation finie : nouveau tableau
@@ -96,6 +109,7 @@ def suivi_actualisation():
             catalogue.reprendre_actualisation()
             st.session_state["suivi_actif"] = True
             st.rerun(scope="app")
+        encadre_duree(st.columns(3)[0], restantes)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -180,6 +194,38 @@ def historique_des_actualisations():
                                 "chaque actualisation jusqu'à cette date.")
 
 
+def planifications_enregistrees():
+    """Recherches planifiées (toutes les tables) : quand, prochain et dernier lancement, pause et suppression."""
+    plans = planification.lire()
+    if not plans:
+        return
+    actives = sum(p.get("active", False) for p in plans)
+    with st.expander(f"🗓️ Recherches planifiées ({actives} active(s) sur {len(plans)})", expanded=bool(actives)):
+        st.caption("Elles partent à l'heure prévue si l'application est ouverte (fenêtre noire) et l'ordinateur "
+                   "allumé ; sinon, dès la réouverture. Si une actualisation tourne déjà, elles attendent leur tour.")
+        for p in plans:
+            with st.container(border=True):
+                c1, c2, c3 = st.columns([6, 1.4, 1.4], vertical_alignment="center")
+                n = len(planification.paires_a_lancer(p | {"mode": "tout"}))
+                c1.markdown(f"**{p['nom']}** · {planification.MODES[p['mode']]} · {planification.quand(p)}  \n"
+                            f"{p['libelle']} · {n} recherche(s) au plus, {duree_texte(n)}")
+                prochain = (f"prochain lancement : **{datetime.fromisoformat(p['prochaine']):%d/%m/%Y} à "
+                            f"{p['prochaine'][11:16]}**"
+                            if p.get("active") and p.get("prochaine") else "aucun lancement prévu")
+                dernier = (f" · dernier : {datetime.fromisoformat(p['derniere']):%d/%m} à {p['derniere'][11:16]}"
+                           if p.get("derniere") else "")
+                c1.caption(f"⏰ {prochain}{dernier} · {p.get('statut', '')}")
+                active = c2.toggle("Active", p.get("active", False), key=f"plan_actif_{p['id']}")
+                if active != p.get("active", False):
+                    if probleme := planification.activer(p["id"], active):
+                        st.error(probleme)
+                    else:
+                        st.rerun()
+                if c3.button("🗑️ Supprimer", key=f"plan_supprimer_{p['id']}", width="stretch"):
+                    planification.supprimer(p["id"])
+                    st.rerun()
+
+
 LISTE_AIRFOX = Path(__file__).parent.parent / "listes" / "airfox.txt"  # destinations de la donnée chargée
 A_COMPLETER = "à compléter"
 NON_RECHERCHEE = "date passée, non recherchée"
@@ -210,7 +256,7 @@ def chiffres_cles():
          else {"trajets": 0, "destinations": 0, "recherches": 0, "derniere_collecte": None})
     c1, c2, c3 = st.columns(3)
     c1.metric("Trajets de la donnée", f"{e['trajets']:,}".replace(",", " "),
-              help=f"{e['destinations']} destinations × aéroports de départ (« Charger la donnée »)")
+              help=f"{e['destinations']} destinations × aéroports de départ (« Charger la donnée Airfox »)")
     c2.metric("Dates recherchées (aller-retour)", f"{e['recherches']:,}".replace(",", " "),
               help="Couples destination × date de départ déjà recherchés, tous nombres de nuits confondus")
     c3.metric("Dernière actualisation", f"{pd.Timestamp(e['derniere_collecte']):%d/%m %H:%M}"
@@ -221,10 +267,11 @@ def chiffres_cles():
 chiffres_cles()
 suivi_actualisation()
 historique_des_actualisations()
+planifications_enregistrees()
 
 tous = catalogue.trajets()
 if tous.empty or not donnees.donnee_presente():
-    st.info("Aucun trajet : chargez d'abord la donnée Airfox dans la page « Charger la donnée ».")
+    st.info("Aucun trajet : chargez d'abord la donnée Airfox dans la page « Charger la donnée Airfox ».")
     st.stop()
 origines = tous.groupby("origine")["ville_depart"].first().fillna("")
 
@@ -259,7 +306,9 @@ trajets_dep = tous[tous["origine"].isin(departs)]
 options_villes = sorted(trajets_dep["ville_arrivee"].dropna().unique())
 st.session_state["villes_arrivee_catalogue"] = [v for v in st.session_state.get("villes_arrivee_catalogue", [])
                                                 if v in options_villes]
+codes_ville = trajets_dep.groupby("ville_arrivee")["destination"].agg(lambda s: ", ".join(sorted(set(s))))
 villes = f2.multiselect("Villes d'arrivée", options_villes, key="villes_arrivee_catalogue",
+                        format_func=lambda v: f"{v} ({codes_ville.get(v, '')})",  # cherchable par nom ou par code
                         placeholder=f"Toutes ({trajets_dep['destination'].nunique()} destinations)")
 if not departs:
     st.info("Choisissez une ville de départ (par exemple Paris).")
@@ -370,17 +419,24 @@ if videe:
                  ("Recherche de nouveau toutes les dates de la table rafraîchie, pour avoir les prix du moment. "
                   if rafraichie else "Recherche toutes les destinations et dates choisies. ") + aide):
         lancer(a_chercher)
-elif manquantes and b1.button(f"🔄 Compléter ({len(manquantes)} recherches, {duree_texte(len(manquantes))})",
-                            disabled=actif, type="primary", width="stretch",
-                            help="Une actualisation est déjà en cours." if actif else
-                            "Seulement les destinations et dates pas encore recherchées. " + aide):
-    lancer(manquantes)
-if not videe and b2.button(f"Tout réactualiser ({len(a_chercher)} recherches, {duree_texte(len(a_chercher))})",
-                           disabled=actif or not a_chercher, width="stretch",
-             help="Une actualisation est déjà en cours." if actif else
-             "Refait toutes les recherches des dates choisies, même celles déjà faites, pour avoir les prix du "
-             "moment. " + aide):
-    lancer(a_chercher)
+    if a_chercher:
+        encadre_duree(b1, len(a_chercher))
+elif manquantes:
+    if b1.button(f"🔄 Compléter ({len(manquantes)} recherches, {duree_texte(len(manquantes))})",
+                 disabled=actif, type="primary", width="stretch",
+                 help="Une actualisation est déjà en cours." if actif else
+                 "Seulement les destinations et dates pas encore recherchées. " + aide):
+        lancer(manquantes)
+    encadre_duree(b1, len(manquantes))
+if not videe:
+    if b2.button(f"Tout réactualiser ({len(a_chercher)} recherches, {duree_texte(len(a_chercher))})",
+                 disabled=actif or not a_chercher, width="stretch",
+                 help="Une actualisation est déjà en cours." if actif else
+                 "Refait toutes les recherches des dates choisies, même celles déjà faites, pour avoir les prix du "
+                 "moment. " + aide):
+        lancer(a_chercher)
+    if a_chercher:
+        encadre_duree(b2, len(a_chercher))
 # Calendrier aller-retour « Paris » de chaque destination, puis celui de ses compagnies les moins chères → prix,
 # compagnie et bagage de chaque date (sans les heures) : toute l'année, ou seulement les dates de départ choisies
 dests_annee = sorted({d for d, _ in a_chercher})
@@ -407,6 +463,42 @@ if (dests_annee and set(departs) <= set(catalogue.PARIS_AEROPORTS)
     st.rerun()
 if actif:
     st.caption("⏳ Une actualisation tourne en arrière-plan : son avancement s'affiche en haut de la page.")
+# Planifier la recherche de la table choisie dans les champs ci-dessus (autant de planifications qu'on veut)
+if a_chercher:
+    with st.expander("🗓️ Planifier la recherche de cette table"):
+        st.caption(f"Table choisie : **{libelle_periode()}**, départ "
+                   f"{', '.join(noms_villes_depart[v] for v in choix_depart)}, "
+                   f"{len({d for d, _ in a_chercher})} destination(s), {len(a_chercher)} recherches au plus. "
+                   "Pour une autre table, changez les champs ci-dessus puis ajoutez une autre planification.")
+        with st.form("nouvelle_planification", clear_on_submit=True):
+            p1, p2 = st.columns(2)
+            nom_plan = p1.text_input("Nom de la planification", placeholder="ex. Thaïlande chaque matin")
+            mode_plan = p2.radio("Recherches", list(planification.MODES), horizontal=True,
+                                 format_func=lambda m: {"completer": "Compléter (dates pas encore recherchées)",
+                                                        "tout": "Tout réactualiser (prix du moment)"}[m])
+            p3, p4, p5 = st.columns(3)
+            repetition = p3.selectbox("Répétition", planification.REPETITIONS)
+            jour_plan = p4.date_input("Date (ou premier jour si répétée)", value=date.today(),
+                                      min_value=date.today(), format="DD/MM/YYYY")
+            heure_plan = p5.time_input("Heure de lancement", value=(datetime.now() + timedelta(hours=1)).replace(
+                minute=0, second=0, microsecond=0).time(), step=timedelta(minutes=5))
+            jours_plan = st.multiselect("Jours de la semaine (seulement pour « certains jours »)", range(7),
+                                        format_func=planification.JOURS.__getitem__, placeholder="Choisir les jours")
+            if st.form_submit_button("➕ Ajouter la planification", type="primary"):
+                probleme = planification.ajouter(
+                    nom_plan.strip(), repetition, jour_plan, heure_plan, jours_plan, mode_plan, a_actualiser,
+                    departs, nuits_ar,
+                    {"departs": choix_depart, "villes": villes, "compagnies": cies, "masquer": avec_vol,
+                     "nuits": nuits_ar, "dates": [d.isoformat() for d in jours_depart]},
+                    libelle_periode())
+                if probleme:
+                    st.error(probleme)
+                else:
+                    st.session_state["plan_ajoute"] = nom_plan.strip()
+                    st.rerun()
+if plan_ajoute := st.session_state.pop("plan_ajoute", None):
+    st.success(f"Planification « {plan_ajoute} » ajoutée : elle apparaît dans « 🗓️ Recherches planifiées » en haut "
+               "de la page.")
 if st.session_state.pop("table_rafraichie", None):
     st.success("Table enregistrée dans « Historique tables rafraîchies » et vidée.")
 if rechargee := st.session_state.pop("table_rechargee", None):

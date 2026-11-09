@@ -45,9 +45,7 @@ def preparer(tab: pd.DataFrame, meme_bagage_seul: bool) -> pd.DataFrame:
 
 def nom_ville(code: str) -> str:
     """Nom de ville d'un code Airfox (PAR -> Paris, LON -> Londres, ACE -> Lanzarote…)."""
-    return {"PAR": "Paris", "LON": "Londres", "MIL": "Milan", "NYC": "New York", "RIO": "Rio de Janeiro",
-            "ROM": "Rome", "TYO": "Tokyo", "YMQ": "Montréal", "YTO": "Toronto", "IZM": "Izmir",
-            "DKR": "Dakar"}.get(code) or catalogue.ville_fr(code)
+    return catalogue.nom_ville_airfox(code)
 
 
 def chiffres_cles(tab: pd.DataFrame):
@@ -422,7 +420,7 @@ else:
     villes = j2["VilleArrivee"].value_counts()
     intitule("Destination")
     ville = st.selectbox("Destination", villes.index, label_visibility="collapsed",
-                         format_func=lambda v: f"{v} ({villes[v]} date(s))")
+                         format_func=lambda v: f"{nom_ville(v)} ({v}) — {villes[v]} date(s)")
     d = j2[j2["VilleArrivee"] == ville].sort_values("Date")
     longue = pd.concat([
         d.assign(Série="Airfox", Tarif=d["Tarif Airfox"], Compagnie=d["CodeTransporteur"]),

@@ -6,20 +6,27 @@ import asyncio
 
 import streamlit as st
 
+import planification
 import session_google
 import titres
 
 st.set_page_config(page_title="Comparateur de vols", page_icon="✈️", layout="wide")
+# Page déjà en français : la traduction automatique du navigateur (Chrome, Edge) modifie la page à l'insu de
+# Streamlit et provoque l'erreur « NotFoundError : removeChild… » ; on la désactive
+st.html("<script>document.documentElement.setAttribute('translate', 'no');"
+        "document.documentElement.classList.add('notranslate');</script>", unsafe_allow_javascript=True)
+planification.surveiller()  # recherches planifiées du Catalogue : vérifiées chaque minute tant que l'application tourne
 
 # Pages de la barre latérale, dans l'ordre, avec le thème (couleur) de leur titre
 PAGES = [
-    ("pages_app/page_donnees.py", "Charger la donnée", "📂", "donnee"),
+    ("pages_app/page_donnees.py", "Charger la donnée Airfox", "📂", "donnee"),
+    ("pages_app/page_profils_marge.py", "Charger la donnée Profils de Marge", "💰", "marge"),
     ("pages_app/page_catalogue.py", "Catalogue aller-retour", "📅", "catalogue"),
     ("pages_app/page_tables.py", "Historique tables rafraîchies", "🗂️", "tables"),
-    ("pages_app/page_recherche.py", "Recherche détaillée", "🔎", "recherche"),
-    ("pages_app/page_pays.py", "Pays → pays", "🌍", "pays"),
     ("pages_app/page_airfox.py", "Comparatif Airfox vs Google Flights", "⚖️", "comparatif"),
     ("pages_app/page_dataviz.py", "Data Visualisation", "📈", "dataviz"),
+    ("pages_app/page_evolution.py", "Evolution tarifs des vols", "📉", "evolution"),
+    ("pages_app/page_evolution_marge.py", "Evolution Profils de Marge", "💹", "evolution_marge"),
     ("pages_app/page_rapport.py", "Rapport Excel", "📊", "rapport"),
     ("pages_app/page_assistant.py", "Assistant Décisionnel", "🤖", "assistant"),
     ("pages_app/page_drive.py", "Envoyer sur Drive", "📤", "drive"),

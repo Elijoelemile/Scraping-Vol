@@ -40,6 +40,13 @@ couleurs_graphiques.json
 dist/
 sauvegardes/
 
-# Comptes de la page « Envoyer sur Drive » (empreintes des mots de passe) : propres à ce PC
+# Comptes de la page « Envoyer sur Drive » (empreintes des mots de passe) : jamais publiés en ligne (seulement dans le zip)
 comptes_drive.json
 comptes_drive.tmp
+# recherches planifiées du Catalogue (personnelles)
+planifications.json
+planifications.tmp
+# fichier Profils de Marge chargé (personnel)
+donnee_profils_marge/
+# fichier des libellés des profils de marge chargé (personnel)
+libelles_profils_marge/

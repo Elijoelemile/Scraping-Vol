@@ -160,3 +160,27 @@ def retirer():
     if DOSSIER_DONNEE.exists():
         for f in DOSSIER_DONNEE.iterdir():
             f.unlink()
+
+
+def nuits_airfox(df: pd.DataFrame) -> int | None:
+    """Durée du séjour des tarifs Airfox (colonne « Duree », en nuits), ou None (aller simple / inconnue)."""
+    duree = pd.to_numeric(df["Duree"], errors="coerce") if "Duree" in df.columns else pd.Series(dtype=float)
+    return int(duree.mode().iloc[0]) if duree.notna().any() else None
+
+
+def fichier_google_flights(df: pd.DataFrame, nuits: int | None) -> pd.DataFrame:
+    """Fichier Google Flights de la page Comparatif : les recherches de la dernière table du Catalogue, au format du
+    fichier Airfox (une ligne par date et par compagnie), pour les destinations de la donnée Airfox."""
+    if "VilleArrivee" not in df.columns:
+        return pd.DataFrame()
+    return catalogue.tableau_google_airfox(sorted(df["VilleArrivee"].dropna().astype(str).unique()),
+                                           int(nuits) if nuits else None, seulement_actualise=True)
+
+
+def vue_google_flights(google: pd.DataFrame) -> pd.DataFrame:
+    """Le Fichier Google Flights tel qu'affiché (dates jj/mm/aaaa, bagage TRUE/FALSE)."""
+    return google.assign(DateAller=pd.to_datetime(google["DateAller"]).dt.strftime("%d/%m/%Y"),
+                         **({"DateRetour": pd.to_datetime(google["DateRetour"]).dt.strftime("%d/%m/%Y")}
+                            if "DateRetour" in google else {}),
+                         FlagBagageInclus=google["FlagBagageInclus"].map({True: "TRUE", False: "FALSE"}).fillna(""),
+                         CollecteLe=pd.to_datetime(google["CollecteLe"]).dt.strftime("%d/%m/%Y %H:%M"))

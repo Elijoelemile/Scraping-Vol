@@ -8,20 +8,31 @@ import time
 import streamlit as st
 
 import comptes_drive as comptes
+import donnees
 from titres import titre_page
 
 ESSAIS_MAX = 5        # mots de passe faux d'affilée avant une attente
 ATTENTE_S = 60        # attente (secondes) après ESSAIS_MAX mots de passe faux
 
 titre_page("Envoyer sur Drive", "drive")
-if not comptes.ouvert():
-    st.warning("Page fermée : aucun code d'accès n'est défini sur cet ordinateur.")
-    st.caption(f"Le détenteur du code le définit dans la variable d'environnement « {comptes.VARIABLE_CODE} » "
-               f"(PowerShell : setx {comptes.VARIABLE_CODE} 'votre code') ; chacun crée ensuite son compte avec ce "
-               "code.")
-    st.stop()
 if message := st.session_state.pop("drive_message", None):
     st.success(message)
+# Premier usage sur ce PC : le détenteur crée le code d'accès, qu'il partagera pour que chacun crée son compte
+if not comptes.code_defini():
+    st.info("Aucun code d'accès n'existe encore sur cet ordinateur : créez-le. C'est le code que vous partagerez "
+            "pour que chaque personne crée son propre compte.")
+    with st.form("creer_code_acces"):
+        code = st.text_input(f"Code d'accès ({comptes.LONGUEUR_MIN} caractères minimum)", type="password")
+        confirmation = st.text_input("Confirmer le code d'accès", type="password")
+        if st.form_submit_button("Créer le code d'accès", type="primary"):
+            if probleme := comptes.creer_code(code, confirmation):
+                st.error(probleme)
+            else:
+                st.session_state["drive_message"] = ("Code d'accès créé. Créez maintenant votre compte (onglet « Créer "
+                                                     "mon compte ») avec ce code, puis partagez-le.")
+                st.rerun()
+    st.caption("Notez-le bien : il n'est gardé que sous forme d'empreinte, personne ne pourra vous le redonner.")
+    st.stop()
 
 
 def trop_d_essais() -> bool:
@@ -124,8 +135,8 @@ if not utilisateur:
     st.stop()
 
 # --- Connecté ---
-c1, c2, c3, c4 = st.columns([3, 2.2, 2.2, 1.6])
-c1.caption(f"Connecté : **{utilisateur}** · récupération : {comptes.masquer(comptes.email_de(utilisateur))}")
+st.caption(f"Connecté : **{utilisateur}** · récupération : {comptes.masquer(comptes.email_de(utilisateur))}")
+c2, c3, c4, _ = st.columns([2.6, 2.6, 1.6, 1])
 with c2.popover("🔑 Modifier le mot de passe", width="stretch"):
     with st.form("changer_mot_de_passe", clear_on_submit=True):
         ancien = st.text_input("Mot de passe actuel", type="password")
@@ -157,6 +168,29 @@ if c4.button("🔒 Verrouiller", width="stretch", help="Referme la page : le mot
     st.session_state.pop("drive_utilisateur", None)
     st.rerun()
 
+# --- Le fichier à envoyer : le Fichier Google Flights de la page Comparatif (même calcul, même type de trajet) ---
+st.header("Fichier Google Flights à envoyer")
+gardee = donnees.donnee_gardee()
+if gardee is None:
+    st.info("Aucune donnée chargée : chargez le fichier Airfox dans la page « Charger la donnée Airfox ».")
+    st.stop()
+df = gardee[0]
+# type de trajet : celui choisi au Catalogue, sinon celui de la donnée Airfox (comme la page Comparatif)
+nuits = st.session_state.get("nuits_catalogue", donnees.nuits_airfox(df)) or None
+google = donnees.fichier_google_flights(df, nuits)
+if google.empty:
+    st.info("Rien à envoyer : le Fichier Google Flights est vide (table du Catalogue pas encore actualisée, ou "
+            "rafraîchie).")
+    st.stop()
+m1, m2, m3 = st.columns(3)
+m1.metric("Lignes", f"{len(google):,}".replace(",", " "))
+m2.metric("Compagnies", google["CodeTransporteur"].nunique())
+m3.metric("Destinations", google["VilleArrivee"].nunique())
+st.dataframe(donnees.vue_google_flights(google), hide_index=True, width="stretch",
+             column_config={"Tarif": st.column_config.NumberColumn(format="%.2f €")})
+st.caption("La même table que le « Fichier Google Flights » de la page Comparatif (toutes ses lignes, sans les "
+           "filtres de cette page).")
+
 if st.button("📤 Envoyer", type="primary"):
-    # Contenu et destination à définir : rien n'est encore envoyé
-    st.info("Le contenu à envoyer et le drive de destination ne sont pas encore définis : rien n'a été envoyé.")
+    # Destination à définir : rien n'est encore envoyé
+    st.info("Le drive de destination n'est pas encore défini : rien n'a été envoyé.")

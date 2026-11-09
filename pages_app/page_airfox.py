@@ -1,4 +1,4 @@
-"""Page « Comparatif Airfox vs Google Flights » : donnée Airfox (page « Charger la donnée »), fichier Google
+"""Page « Comparatif Airfox vs Google Flights » : donnée Airfox (page « Charger la donnée Airfox »), fichier Google
 Flights (recherches actualisées du Catalogue) et leurs jointures."""
 import pandas as pd
 import streamlit as st
@@ -8,10 +8,10 @@ import donnees
 from titres import titre_page
 
 titre_page("Comparatif Airfox vs Google Flights", "comparatif")
-# La donnée Airfox vient de la page « Charger la donnée » ; sans elle, la page reste vide
+# La donnée Airfox vient de la page « Charger la donnée Airfox » ; sans elle, la page reste vide
 gardee = donnees.donnee_gardee()
 if gardee is None:
-    st.info("Aucune donnée chargée : chargez le fichier Airfox dans la page « Charger la donnée ».")
+    st.info("Aucune donnée chargée : chargez le fichier Airfox dans la page « Charger la donnée Airfox ».")
     st.stop()
 
 
@@ -20,6 +20,7 @@ def filtrer(tab: pd.DataFrame, cle: str) -> pd.DataFrame:
     f1, f2, f3, f4 = st.columns([3, 3, 3, 2])
     if "VilleArrivee" in tab:
         villes = f1.multiselect("Ville d'arrivée", sorted(tab["VilleArrivee"].dropna().astype(str).unique()),
+                                format_func=lambda v: f"{catalogue.nom_ville_airfox(v)} ({v})",
                                 placeholder="Toutes", key=f"{cle}_villes")
         if villes:
             tab = tab[tab["VilleArrivee"].astype(str).isin(villes)]
@@ -80,8 +81,7 @@ avertissement = st.empty()  # rempli plus bas, selon le type de trajet choisi po
 # --- Fichier Google Flights (données du catalogue), au même format pour la jointure ----------------------
 st.header("Fichier Google Flights")
 # Durée du séjour des tarifs Airfox (colonne « Duree », en nuits) : les tarifs Google doivent être comparables
-nuits_airfox = (int(pd.to_numeric(df["Duree"], errors="coerce").mode().iloc[0])
-                if "Duree" in df.columns and pd.to_numeric(df["Duree"], errors="coerce").notna().any() else None)
+nuits_airfox = donnees.nuits_airfox(df)
 # Type de trajet : celui choisi dans la page Catalogue (tableau « Toutes les dates ») ; None = aller simple.
 # Catalogue pas encore ouvert dans cette session : celui de la donnée Airfox (ex. aller-retour de 7 nuits)
 nuits = st.session_state.get("nuits_catalogue", nuits_airfox) or None  # 0 = aller simple choisi au Catalogue
@@ -95,8 +95,7 @@ if "VilleArrivee" not in df.columns:
     st.warning("Colonne « VilleArrivee » introuvable dans le fichier Airfox : impossible de choisir les destinations.")
     st.stop()
 # Fichier Google Flights : les recherches actualisées dans le Catalogue (boutons « Compléter » / « Actualiser »)
-google = catalogue.tableau_google_airfox(sorted(df["VilleArrivee"].dropna().astype(str).unique()),
-                                        int(nuits) if aller_retour else None, seulement_actualise=True)
+google = donnees.fichier_google_flights(df, nuits)
 st.session_state["rapport_google"] = google.copy()
 if google.empty:
     st.session_state["rapport_google"] = None
@@ -108,11 +107,7 @@ d1, d2, d3 = st.columns(3)
 d1.metric("Lignes", f"{len(google):,}".replace(",", " "))
 d2.metric("Compagnies", google["CodeTransporteur"].nunique())
 d3.metric("Destinations", google["VilleArrivee"].nunique())
-vue = google.assign(DateAller=pd.to_datetime(google["DateAller"]).dt.strftime("%d/%m/%Y"),
-                    **({"DateRetour": pd.to_datetime(google["DateRetour"]).dt.strftime("%d/%m/%Y")}
-                       if "DateRetour" in google else {}),
-                    FlagBagageInclus=google["FlagBagageInclus"].map({True: "TRUE", False: "FALSE"}).fillna(""),
-                    CollecteLe=pd.to_datetime(google["CollecteLe"]).dt.strftime("%d/%m/%Y %H:%M"))
+vue = donnees.vue_google_flights(google)
 vue_google = filtrer(vue, "google")
 st.caption(f"{len(vue_google):,} ligne(s) affichée(s)".replace(",", " "))
 st.dataframe(vue_google, hide_index=True, width="stretch", lazy=False, column_config=TARIF_EUROS)

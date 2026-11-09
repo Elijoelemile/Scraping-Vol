@@ -1,4 +1,4 @@
-"""Page « Charger la donnée » : fichier Airfox de référence ; le catalogue est remplacé par ses trajets."""
+"""Page « Charger la donnée Airfox » : fichier Airfox de référence ; le catalogue est remplacé par ses trajets."""
 from datetime import datetime
 
 import pandas as pd
@@ -7,7 +7,7 @@ import streamlit as st
 import donnees
 from titres import titre_page
 
-titre_page("Charger la donnée", "donnee")
+titre_page("Charger la donnée Airfox", "donnee")
 st.caption("Chargez le fichier Airfox : ses destinations deviennent celles du catalogue.")
 
 CLES_RAPPORT = ("rapport_airfox", "rapport_google", "rapport_jointure", "rapport_jointure_moins_chere", "rapport_graphique")

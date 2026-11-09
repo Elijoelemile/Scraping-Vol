@@ -25,7 +25,11 @@ URL_PYTHON = f"https://www.python.org/ftp/python/{VERSION_PYTHON}/python-{VERSIO
 # e-mail des alertes), ni d'actualisation en cours. Par défaut, pas vos données non plus : la personne qui reçoit
 # le zip part d'une base vide (créée au premier lancement) et charge sa propre donnée Airfox.
 FICHIERS = ["app.py", "catalogue.py", "db.py", "donnees.py", "google_flights_scraper.py", "pays.py", "recap.py",
-            "session_google.py", "titres.py", "alerte.py", "actions.py", "comptes_drive.py", "origines.txt", "requirements.txt", "README.md"]
+            "session_google.py", "titres.py", "alerte.py", "actions.py", "comptes_drive.py", "planification.py", "profils_marge.py", "origines.txt", "requirements.txt", "README.md",
+            # page « Envoyer sur Drive » : code d'accès et comptes (empreintes seulement, aucun mot de passe en clair)
+            # transmis avec le zip ; la personne qui le reçoit se connecte avec le compte existant, puis change chez
+            # elle mot de passe et adresse de récupération
+            "comptes_drive.json"]
 DOSSIERS = ["pages_app", "listes", ".streamlit"]  # .streamlit : réglages (police Montserrat)
 # --avec-ma-base : ajoute la base, la donnée Airfox chargée et les historiques (pour votre propre autre ordinateur)
 MES_DONNEES = (["vols.db", "derniere_table.json"], ["donnee_chargee", "historique_catalogue", "historique_actualisations",
@@ -74,7 +78,7 @@ Ordinateur : Windows 10 ou 11, 64 bits, connecté à Internet. Rien à installer
 
 Pour quitter : fermer la fenêtre de l'application, puis la fenêtre noire.
 
-Au premier lancement, la base est vide : charger la donnée Airfox dans « Charger la donnée », puis lancer
+Au premier lancement, la base est vide : charger la donnée Airfox dans « Charger la donnée Airfox », puis lancer
 les recherches dans « Catalogue aller-retour ».
 Les données (catalogue, recherches, donnée Airfox, historiques) sont dans le dossier « app ».
 Les recherches faites sur cet ordinateur restent sur cet ordinateur.

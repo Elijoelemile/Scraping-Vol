@@ -8,7 +8,8 @@ import streamlit as st
 
 # Couleur de chaque thème : (claire au centre, foncée sur les bords)
 COULEURS = {
-    "donnee": ("#5fd3b4", "#0f6b55"),      # Charger la donnée : vert d'eau
+    "donnee": ("#5fd3b4", "#0f6b55"),      # Charger la donnée Airfox : vert d'eau
+    "marge": ("#c9a3f2", "#5a2a8a"),       # Charger la donnée Profils de Marge : lavande
     "catalogue": ("#7fb6f0", "#174a8b"),   # Catalogue : bleu ciel → bleu
     "tables": ("#d6b98a", "#6b4a16"),      # Historique tables rafraîchies : sépia (archives)
     "recherche": ("#b79af0", "#4b2a8a"),   # Recherche détaillée : violet
@@ -18,13 +19,15 @@ COULEURS = {
     "dataviz": ("#f5a3d9", "#8e1f6b"),     # Data Visualisation : magenta
     "assistant": ("#f19aa8", "#8c1d32"),   # Assistant décisionnel : rouge bordeaux
     "drive": ("#9fb3c8", "#2c3e55"),       # Envoyer sur Drive : gris ardoise
+    "evolution": ("#c5e17a", "#4f6b12"),   # Evolution tarifs des vols : vert olive
+    "evolution_marge": ("#a5b4fc", "#3730a3"),  # Evolution Profils de Marge : indigo
 }
 
 
 # Fond de la page principale, une teinte très pâle de la couleur du thème (pages sans fond : blanc)
 FONDS = {"donnee": "#ecfaf6", "catalogue": "#f0f6fd", "tables": "#faf6ef", "recherche": "#f6f3fd", "pays": "#f0fbfd",
          "comparatif": "#fff8ec", "dataviz": "#fef4fa", "rapport": "#eff9f3", "assistant": "#fdf3f5",
-         "drive": "#f3f5f8"}
+         "drive": "#f3f5f8", "evolution": "#f7fbec", "marge": "#f8f3fe", "evolution_marge": "#f2f4ff"}
 
 
 def aplat(couleur: str, part: float = 0.28) -> str:
@@ -45,7 +48,7 @@ def titre_page(texte: str, theme: str):
         "[data-testid='stDateInputField']", "[data-testid='stNumberInputContainer']",
         "[data-testid='stTextInputRootElement']", "[data-testid='stTextAreaRootElement']",
         "[data-testid='stDataFrameResizable']",  # tableaux (consultation et modifiables)
-        "[data-testid='stFileUploaderDropzone']"))  # zone de dépôt de fichier (« Charger la donnée »)
+        "[data-testid='stFileUploaderDropzone']"))  # zone de dépôt de fichier (« Charger la donnée Airfox »)
     st.markdown("<style>.block-container, [data-testid='stMainBlockContainer'] {padding-top: 3.2rem;}"
                 + (f"[data-testid='stMain'], [data-testid='stHeader'] {{background: {FONDS[theme]};}}"
                    if theme in FONDS else "")

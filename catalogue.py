@@ -744,11 +744,11 @@ CONFIRMER_AUCUN_VOL = True  # « aucun vol » : une 2e recherche le confirme (un
 
 async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], delai: float = 1.2,
                             on_progress=None, nuits: int | None = None, parallele: int = 4,
-                            echecs: list | None = None) -> int:
+                            echecs: list | None = None, arret=None) -> int:
     """Recherches en direct pour des (destination, date) choisies dans l'application, `parallele` à la fois ;
     nuits : aller-retour (retour nuits jours après l'aller). Une recherche en erreur est refaite (ESSAIS_PAR_DATE),
-    un « aucun vol » est confirmé par une 2e recherche ; echecs : reçoit les (destination, date) restées en erreur.
-    Renvoie le nb avec vols. Lève Bloque si Google bloque."""
+    un « aucun vol » est confirmé par une 2e recherche ; echecs : reçoit les (destination, date) restées en erreur ;
+    arret() vrai : les recherches pas encore commencées sont sautées (« Arrêter »). Renvoie le nb avec vols. Lève Bloque si Google bloque."""
     gf = GoogleFlights(delai)
     places = asyncio.Semaphore(parallele)
     bloque = asyncio.Event()
@@ -758,7 +758,7 @@ async def actualiser_direct(paires: list[tuple[str, str]], origines: list[str], 
     async def une(d, jour):
         nonlocal faites, trouvees
         async with places:
-            if bloque.is_set():
+            if bloque.is_set() or (arret and arret()):
                 return
             retour = (date.fromisoformat(jour) + timedelta(days=nuits)).isoformat() if nuits else None
             avec_vols, aucun_vol_vu = False, False
@@ -928,11 +928,14 @@ FICHIER_ARRET = Path(__file__).with_name("actualisation.arret")
 FICHIER_PAIRES = Path(__file__).with_name("actualisation_paires.json")  # les (destination, date) à rechercher
 FICHIER_REPRENDRE = Path(__file__).with_name("actualisation.reprendre")  # demande : finir la pause tout de suite
 # Rythme des recherches, adaptatif et gardé dans rythme.json : après un blocage de Google, on ralentit (délai × 1,5,
-# une seule recherche à la fois au-delà de 5 s) ; après chaque lot sans blocage, on accélère doucement (délai × 0,93),
-# jamais sous DELAI_MIN. Au départ : une demande toutes les 3 s, 2 recherches à la fois.
+# une seule recherche à la fois au-delà de 5 s) ; après chaque lot sans blocage, on accélère (délai × ACCELERATION),
+# jamais sous DELAI_MIN. Au départ : une demande toutes les 3 s, 2 recherches à la fois. Dernier blocage plus vieux
+# que OUBLI_BLOCAGE_H : on repart du rythme de départ (Google a levé le blocage depuis longtemps).
 FICHIER_RYTHME = Path(__file__).with_name("rythme.json")
 RYTHME_DEPART = {"delai": 3.0, "parallele": 2}
 DELAI_MIN, DELAI_MAX = 2.0, 10.0
+ACCELERATION = 0.8   # de 10 s à 5 s (2 recherches à la fois) en 3 lots sans blocage, au rythme de départ en 6
+OUBLI_BLOCAGE_H = 6
 APPELS_PAR_RECHERCHE = 2.2  # une recherche = 1 à 3 appels à Google (pages de résultats, prix manquants)
 
 
@@ -940,16 +943,20 @@ def lire_rythme() -> dict:
     try:
         r = json.loads(FICHIER_RYTHME.read_text(encoding="utf-8"))
         delai = min(DELAI_MAX, max(DELAI_MIN, float(r["delai"])))
-        return {"delai": delai, "parallele": 1 if delai >= 5 else 2}
+        bloque_le = datetime.fromisoformat(r["bloque_le"]) if r.get("bloque_le") else datetime.min
+        if delai > RYTHME_DEPART["delai"] and datetime.now() - bloque_le > timedelta(hours=OUBLI_BLOCAGE_H):
+            return dict(RYTHME_DEPART)
+        return {"delai": delai, "parallele": 1 if delai >= 5 else 2, "bloque_le": r.get("bloque_le")}
     except (FileNotFoundError, PermissionError, ValueError, KeyError, TypeError):
         return dict(RYTHME_DEPART)
 
 
 def ajuster_rythme(bloque: bool) -> dict:
-    """Ralentit après un blocage, accélère doucement après un lot sans blocage ; renvoie le nouveau rythme."""
-    delai = lire_rythme()["delai"]
-    delai = min(DELAI_MAX, delai * 1.5) if bloque else max(DELAI_MIN, delai * 0.93)
-    rythme = {"delai": round(delai, 2), "parallele": 1 if delai >= 5 else 2}
+    """Ralentit après un blocage, accélère après un lot sans blocage ; renvoie le nouveau rythme."""
+    actuel = lire_rythme()
+    delai = min(DELAI_MAX, actuel["delai"] * 1.5) if bloque else max(DELAI_MIN, actuel["delai"] * ACCELERATION)
+    rythme = {"delai": round(delai, 2), "parallele": 1 if delai >= 5 else 2,
+              "bloque_le": datetime.now().isoformat(timespec="seconds") if bloque else actuel.get("bloque_le")}
     try:
         FICHIER_RYTHME.write_text(json.dumps(rythme), encoding="utf-8")
     except OSError:
@@ -971,8 +978,11 @@ def texte_rythme(r: dict | None = None) -> str:
 PAUSE_BLOCAGE_MIN = 30        # attente après un blocage de Google, puis reprise automatique
 PAUSE_REGULIERE_MIN = 5       # pause de précaution toutes les RECHERCHES_ENTRE_PAUSES recherches…
 RECHERCHES_ENTRE_PAUSES = 1000  # …sans compter celles déjà suivies d'une pause de blocage
+PAUSE_RESEAU_MIN = 2          # connexion Internet coupée (veille, Wi-Fi, VPN) : nouvel essai du lot après 2 min…
+MAX_COUPURE_RESEAU_MIN = 180  # …pendant 3 h au plus, puis arrêt (les recherches faites restent enregistrées)
 MAX_BLOCAGES = 12             # blocages tolérés d'affilée avant l'arrêt
-LOT_FOND = 40                 # recherches par lot (≈ 2 min) : l'arrêt est pris en compte entre deux lots
+LOT_FOND = 40                 # recherches par lot (≈ 2 min au rythme de départ) ; l'arrêt, lui, est pris en compte
+                              # après chaque recherche
 
 
 def _ecrire_actualisation(**champs):
@@ -1110,8 +1120,10 @@ def recherches_restantes() -> list[tuple[str, str]]:
     except (FileNotFoundError, PermissionError, json.JSONDecodeError):
         return []
     nuits, origines = etat_fond.get("nuits"), etat_fond.get("origines") or []
-    cherches = set(zip(*[vols_jour_tableau(sorted(set(origines) | set(PARIS_AEROPORTS)), nuits)[c]
-                         for c in ("destination", "date")]))
+    faites = vols_jour_tableau(sorted(set(origines) | set(PARIS_AEROPORTS)), nuits)
+    if etat_fond.get("debut"):  # « Tout réactualiser » : un tarif d'avant cette actualisation reste à refaire
+        faites = faites[faites["collecte_le"] >= etat_fond["debut"]]
+    cherches = set(zip(faites["destination"], faites["date"]))
     return [p for p in paires if p not in cherches]
 
 
@@ -1175,11 +1187,13 @@ def paires_videes(nuits: int | None) -> set[tuple[str, str]]:
 
 
 def tables_rafraichies() -> list[dict]:
-    """Tables rafraîchies enregistrées, la plus récente d'abord : {nom, rafraichie_le, description, lignes}."""
+    """Tables rafraîchies enregistrées, la plus récente d'abord : {nom, type, rafraichie_le, description, lignes} ;
+    type « catalogue » (Rafraîchir la table) ou « pm » (fichier Profils de Marge remplacé par un fichier d'une autre
+    date)."""
     resultat = []
     for f in sorted(DOSSIER_TABLES.glob("*.json"), reverse=True) if DOSSIER_TABLES.exists() else []:
         try:
-            resultat.append({"nom": f.stem} | json.loads(f.read_text(encoding="utf-8")))
+            resultat.append({"nom": f.stem, "type": "catalogue"} | json.loads(f.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError):
             pass
     return resultat
@@ -1221,8 +1235,8 @@ def recharger_table_rafraichie(nom: str):
 
 
 def supprimer_table_rafraichie(nom: str):
-    """Supprime une table de l'historique (son .parquet et son .json)."""
-    for ext in (".parquet", ".json"):
+    """Supprime une table de l'historique (son .parquet, ou son .csv pour une table Profils de Marge, et son .json)."""
+    for ext in (".parquet", ".csv", ".json"):
         (DOSSIER_TABLES / f"{nom}{ext}").unlink(missing_ok=True)
 
 
@@ -1291,6 +1305,7 @@ async def actualisation_fond():
     derniere_passe = False
     depuis_pause = 0  # recherches faites depuis la dernière pause (de précaution ou de blocage)
     heures_blocages = list(etat_fond.get("heures_blocages", []))  # heure de chaque blocage (historique)
+    coupure_depuis = None  # début de la coupure d'Internet en cours
     while i < len(paires) or (echecs and not derniere_passe):
         if i >= len(paires):
             # Dernière passe : les dates restées en erreur sont redemandées une fois, plus tard (Google répond mieux)
@@ -1308,9 +1323,14 @@ async def actualisation_fond():
             _ecrire_actualisation(rythme=texte_rythme(rythme))
             trouvees += await actualiser_direct(
                 lot, origines, nuits=nuits, echecs=echecs_lot, delai=rythme["delai"], parallele=rythme["parallele"],
-                on_progress=lambda k, total, msg: _ecrire_actualisation(faites=i + k, message=msg))
+                on_progress=lambda k, total, msg: _ecrire_actualisation(faites=i + k, message=msg),
+                arret=FICHIER_ARRET.exists)
+            if FICHIER_ARRET.exists():  # « Arrêter » en plein lot : les recherches faites sont déjà enregistrées
+                _ecrire_actualisation(statut="arrêtée", trouvees=trouvees, message="arrêtée à votre demande",
+                                      fin=datetime.now().isoformat(timespec="seconds"))
+                return
             i += len(lot)
-            blocages = 0
+            blocages, coupure_depuis = 0, None
             ajuster_rythme(bloque=False)  # lot sans blocage : on accélère doucement
             if derniere_passe:
                 incompletes.extend(echecs_lot)
@@ -1330,6 +1350,24 @@ async def actualisation_fond():
                 await _attendre_reprise(reprise)
                 depuis_pause = 0
                 _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…")
+        except httpx.TransportError as e:  # plus d'Internet (getaddrinfo failed…) : ce n'est pas Google qui bloque
+            coupure_depuis = coupure_depuis or datetime.now()
+            print(f"{datetime.now():%d/%m %H:%M:%S} connexion Internet coupée : {type(e).__name__} : {e}", flush=True)
+            if datetime.now() - coupure_depuis > timedelta(minutes=MAX_COUPURE_RESEAU_MIN):
+                _ecrire_actualisation(statut="erreur", faites=i, trouvees=trouvees,
+                                      message=f"pas de connexion Internet depuis {MAX_COUPURE_RESEAU_MIN // 60} h : "
+                                              "relancez avec « Reprendre » quand Internet revient",
+                                      fin=datetime.now().isoformat(timespec="seconds"))
+                return
+            reprise = datetime.now() + timedelta(minutes=PAUSE_RESEAU_MIN)
+            _ecrire_actualisation(statut="pause", faites=i, trouvees=trouvees,
+                                  reprise_a=reprise.isoformat(timespec="seconds"),
+                                  message=f"connexion Internet coupée depuis {coupure_depuis:%H:%M} : nouvel essai "
+                                          f"à {reprise:%H:%M}")
+            debut_pause = datetime.now()
+            await _attendre_reprise(reprise)
+            pause_s += (datetime.now() - debut_pause).total_seconds()
+            _ecrire_actualisation(statut="en cours", reprise_a=None, message="reprise…", pause_s=round(pause_s))
         except Bloque as e:
             rythme = ajuster_rythme(bloque=True)  # blocage : on ralentit pour la reprise
             print(f"{datetime.now():%d/%m %H:%M:%S} blocage : {e} — nouveau rythme : {texte_rythme(rythme)}",
@@ -1568,6 +1606,13 @@ async def collecter_ar(o: str, d: str, duree: int) -> int:
 
 
 _VILLES_FR = None
+
+
+def nom_ville_airfox(code: str) -> str:
+    """Nom de ville d'un code Airfox (PAR -> Paris, LON -> Londres, ACE -> Lanzarote…)."""
+    return {"PAR": "Paris", "LON": "Londres", "MIL": "Milan", "NYC": "New York", "RIO": "Rio de Janeiro",
+            "ROM": "Rome", "TYO": "Tokyo", "YMQ": "Montréal", "YTO": "Toronto", "IZM": "Izmir",
+            "DKR": "Dakar"}.get(code) or ville_fr(code)
 
 
 def ville_fr(code: str) -> str:

@@ -79,8 +79,18 @@ st.caption(f"{st.session_state['pays_libelle']} : {len(df)} vols trouvés, de {d
 
 # Filtres
 f1, f2, f3 = st.columns([3, 3, 1.4])
-choix_dep = f1.multiselect("Villes de départ", sorted(df["ville_depart"].dropna().unique()), placeholder="Toutes")
-choix_arr = f2.multiselect("Villes d'arrivée", sorted(df["ville_arrivee"].dropna().unique()), placeholder="Toutes")
+def codes_par_ville(ville: str, aeroport: str) -> pd.Series:
+    """« Lisbonne » -> « LIS » : la ville se retrouve aussi par le code de son (ou ses) aéroport(s)."""
+    if aeroport not in df:
+        return pd.Series(dtype=str)
+    return df.groupby(ville)[aeroport].agg(lambda s: ", ".join(sorted(set(s.dropna().astype(str)))))
+
+
+codes_dep, codes_arr = codes_par_ville("ville_depart", "aeroport_depart"), codes_par_ville("ville_arrivee", "aeroport_arrivee")
+choix_dep = f1.multiselect("Villes de départ", sorted(df["ville_depart"].dropna().unique()), placeholder="Toutes",
+                           format_func=lambda v: f"{v} ({codes_dep[v]})" if codes_dep.get(v) else v)
+choix_arr = f2.multiselect("Villes d'arrivée", sorted(df["ville_arrivee"].dropna().unique()), placeholder="Toutes",
+                           format_func=lambda v: f"{v} ({codes_arr[v]})" if codes_arr.get(v) else v)
 escales_max = ESCALES[f3.selectbox("Escales", list(ESCALES))]
 vue = df
 if choix_dep:

@@ -1,7 +1,7 @@
 """Comptes de la page « Envoyer sur Drive » : chaque personne est autonome.
 
-- Le détenteur ne partage qu'un code d'accès (variable d'environnement CODE_ENVOI_DRIVE), à redonner quand il met à
-  jour l'application. Avec ce code, chacun crée lui-même son compte : identifiant, mot de passe et adresse e-mail de
+- Le détenteur crée un code d'accès dans la page (à défaut : variable d'environnement CODE_ENVOI_DRIVE), le seul
+  élément qu'il partage, et à redonner quand il met à jour l'application. Avec ce code, chacun crée lui-même son compte : identifiant, mot de passe et adresse e-mail de
   récupération (obligatoire).
 - Chacun modifie ensuite son mot de passe (et son adresse) lui-même ; en cas d'oubli, un e-mail est envoyé à son
   adresse de récupération, avec un bouton « Mot de passe de récupération ». Le lien du bouton est toujours le même pour
@@ -9,7 +9,8 @@
   le premier e-mail. Il ne change (et les anciens e-mails ne marchent plus) que si l'adresse de récupération change.
 
 Rien n'est gardé en clair : les mots de passe ne sont écrits que sous forme d'empreinte (PBKDF2-SHA256 salé), dans
-comptes_drive.json (propre à ce PC : ni dans git, ni dans le zip), avec la clé secrète qui signe les liens.
+comptes_drive.json (pas dans git ; transmis avec le zip, pour que la personne qui le reçoit se connecte avec
+le compte existant, puis change chez elle son mot de passe et son adresse de récupération), avec la clé secrète qui signe les liens.
 Envoi des e-mails : mêmes variables que les alertes (ALERTE_SMTP_UTILISATEUR, ALERTE_SMTP_MOT_DE_PASSE, et au besoin
 ALERTE_SMTP_SERVEUR / ALERTE_SMTP_PORT).
 """
@@ -50,7 +51,8 @@ def _lire() -> dict:
         donnees = json.loads(FICHIER.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         donnees = {}
-    return {"comptes": donnees.get("comptes", {}), "cle": donnees.get("cle") or secrets.token_hex(32)}
+    return {"comptes": donnees.get("comptes", {}), "cle": donnees.get("cle") or secrets.token_hex(32),
+            "code_acces": donnees.get("code_acces")}
 
 
 def _ecrire(donnees: dict):
@@ -72,9 +74,32 @@ def _correspond(secret: str, entree: dict) -> bool:
     return hmac.compare_digest(_empreinte(secret, entree["sel"]), entree["empreinte"])
 
 
-def ouvert() -> bool:
-    """La page peut-elle être utilisée ? (des comptes existent, ou un code d'accès permet d'en créer)"""
-    return bool(_lire()["comptes"]) or bool(variable(VARIABLE_CODE))
+def code_defini() -> bool:
+    """Un code d'accès existe-t-il ? (créé dans la page, ou à défaut dans la variable d'environnement)"""
+    return bool(_lire()["code_acces"]) or bool(variable(VARIABLE_CODE))
+
+
+def creer_code(code: str, confirmation: str) -> str | None:
+    """Le détenteur crée le code d'accès (une seule fois sur ce PC) : seule son empreinte est gardée. Renvoie le
+    problème, ou None si c'est fait."""
+    if code_defini():
+        return "Un code d'accès existe déjà sur cet ordinateur."
+    if len(code) < LONGUEUR_MIN:
+        return f"Le code d'accès doit faire au moins {LONGUEUR_MIN} caractères."
+    if code != confirmation:
+        return "Les deux saisies du code d'accès sont différentes."
+    donnees = _lire()
+    donnees["code_acces"] = _proteger(code)
+    _ecrire(donnees)
+    return None
+
+
+def code_acces_valide(code: str) -> bool:
+    enregistre = _lire()["code_acces"]
+    if enregistre:
+        return _correspond(code, enregistre)
+    attendu = variable(VARIABLE_CODE)
+    return bool(attendu) and hmac.compare_digest(code.encode(), attendu.encode())
 
 
 def email_valide(email: str) -> bool:
@@ -91,8 +116,7 @@ def probleme_mot_de_passe(nouveau: str, confirmation: str) -> str | None:
 
 def creer(identifiant: str, email: str, mot_de_passe: str, confirmation: str, code_acces: str) -> str | None:
     """Crée son propre compte avec le code d'accès partagé. Renvoie le problème, ou None si c'est fait."""
-    code = variable(VARIABLE_CODE)
-    if not code or not hmac.compare_digest(code_acces.encode(), code.encode()):
+    if not code_acces_valide(code_acces):
         return "Code d'accès faux."
     if not identifiant:
         return "Choisissez un identifiant."
